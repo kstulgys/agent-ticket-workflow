@@ -6,7 +6,7 @@ Use this only when your organization blocks personal API tokens, so
 from a browser that already holds the session.
 
 ```bash
-cd ~/.claude/skills/ticket-workflow
+cd ~/.claude/skills/agent-ticket-workflow
 python3 scripts/jira-cookies.py    # writes /tmp/jira-state.json from your Chrome profile
 ```
 

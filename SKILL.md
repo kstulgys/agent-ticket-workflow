@@ -1,5 +1,5 @@
 ---
-name: ticket-workflow
+name: agent-ticket-workflow
 description: >
   Work an Azure Boards, Jira, or GitHub ticket end to end: read it, classify it,
   ship the fix, open the pull request, then comment and route it. Use when given
@@ -62,7 +62,7 @@ the work.
 ## 0. Preflight
 
 ```bash
-T=~/.claude/skills/ticket-workflow/scripts/tk
+T=~/.claude/skills/agent-ticket-workflow/scripts/tk
 $T doctor
 ```
 
@@ -74,7 +74,7 @@ one the row read: `tracker` or `host`.
 `doctor` reads every profile on disk, so a stale token on a project this run
 never touches also exits 1. Stop only when a failing row is the project this run
 needs. Then hand the user its `fix` command, usually `scripts/setup.sh
-<provider>` run from `~/.claude/skills/ticket-workflow`, because minting a token
+<provider>` run from `~/.claude/skills/agent-ticket-workflow`, because minting a token
 is the user's step. Name any other gap once and carry on. A bare ticket id names
 no project yet, so re-check the rows against the slug `resolve` returns in step
 1.

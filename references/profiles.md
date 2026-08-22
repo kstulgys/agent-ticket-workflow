@@ -239,7 +239,7 @@ Prose, written for the agent, one file per project.
 ## Checking a new profile
 
 ```bash
-T=~/.claude/skills/ticket-workflow/scripts/tk
+T=~/.claude/skills/agent-ticket-workflow/scripts/tk
 TICKET=59644               # a real ticket id or key in this project
 $T doctor                  # the token reaches this project, repo included
 $T resolve "$TICKET"       # the match rules pick this slug

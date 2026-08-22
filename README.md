@@ -1,4 +1,4 @@
-# ticket-workflow
+# agent-ticket-workflow
 
 An agent skill that works a ticket end to end. It reads the ticket, classifies
 the work that remains, ships the fix, opens the pull request, then comments on
@@ -60,12 +60,13 @@ table.
 
 ## Install
 
-Clone into your skills directory, under the skill's own name:
+Clone into your skills directory. The directory name must match the skill name,
+which is the same as the repository name:
 
 ```bash
-git clone https://github.com/<you>/agent-ticket-workflow.git \
-  ~/.claude/skills/ticket-workflow
-cd ~/.claude/skills/ticket-workflow
+git clone https://github.com/kstulgys/agent-ticket-workflow.git \
+  ~/.claude/skills/agent-ticket-workflow
+cd ~/.claude/skills/agent-ticket-workflow
 ```
 
 Then run the wizard. It installs the Superpowers plugin, then walks you through
