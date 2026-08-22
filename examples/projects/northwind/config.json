@@ -1,0 +1,52 @@
+{
+  "slug": "northwind",
+  "match": {
+    "ticket_patterns": ["^[0-9]{5,6}$"],
+    "tracker_urls": ["dev.azure.com/northwind"],
+    "repo_paths": ["~/Repositories/Contoso-migration"]
+  },
+  "tracker": {
+    "kind": "azure",
+    "org": "https://dev.azure.com/northwind",
+    "project": "Contoso migration",
+    "api_version": "7.1-preview",
+    "auth_env": { "token": "AZDO_PAT" }
+  },
+  "host": {
+    "kind": "azure-repos",
+    "repo": "Contoso.migration",
+    "repo_id": "11111111-1111-1111-1111-111111111111",
+    "project_id": "22222222-2222-2222-2222-222222222222",
+    "local_path": "~/Repositories/Contoso-migration",
+    "base_branch": "master",
+    "branch_pattern": "feature/{id}-{slug}",
+    "commit_subject": "[{id}] {area} | {summary}",
+    "identity": { "name": "Example.Dev", "email": "dev@example.com" },
+    "auth_env": { "user": "AZDO_USER", "token": "AZDO_PAT" }
+  },
+  "buckets": {
+    "fixable-here": {
+      "state": { "Task": "In Progress", "Bug": "Committed" },
+      "assignee": "self"
+    },
+    "owned-elsewhere": { "state": null, "assignee": null },
+    "split": {
+      "state": { "Task": "In Progress", "Bug": "Committed" },
+      "assignee": "self"
+    },
+    "needs-clarification": { "state": null, "assignee": null }
+  },
+  "people": {
+    "self": { "id": "33333333-3333-3333-3333-333333333333" },
+    "reviewer": { "id": "44444444-4444-4444-4444-444444444444" }
+  },
+  "link_rules": {
+    "link_types": ["Task"],
+    "never_link_types": ["Bug", "Product Backlog Item"]
+  },
+  "deploy_gate": {
+    "state": { "Bug": "Ready for Test", "Product Backlog Item": "Ready for Test" }
+  },
+  "preview": { "bypass_env": "NORTHWIND_BYPASS_{BRAND}" },
+  "notes": "notes.md"
+}

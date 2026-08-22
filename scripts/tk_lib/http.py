@@ -1,0 +1,97 @@
+"""One request path for every provider."""
+import base64
+import json
+import time
+import urllib.error
+import urllib.request
+
+from . import secrets
+
+RETRY_STATUS = (429, 500, 502, 503, 504)
+# A POST is not idempotent. Every comment this CLI writes is a POST, and a 500
+# can arrive after the server stored the comment. The retry then stores a second
+# comment, and the read-back cannot catch it, because the last comment still
+# matches the text we sent. A 429 is safe to replay, because the server refused
+# the request before it did any work. Keep this list at one status. Do not merge
+# it back into RETRY_STATUS.
+POST_RETRY_STATUS = (429,)
+
+
+class HttpError(Exception):
+    def __init__(self, status, body):
+        self.status = status
+        self.body = secrets.scrub(body)[:500]
+        super().__init__(f"HTTP {status}: {self.body}")
+
+
+class Http:
+    def __init__(self, opener=None, sleep=None, retries=2):
+        self._opener = opener or urllib.request.urlopen
+        self._sleep = sleep or time.sleep
+        self._retries = retries
+
+    def raw(self, method, url, body=None, headers=None):
+        headers = dict(headers or {})
+        if body is None or isinstance(body, bytes):
+            data = body
+        else:
+            data = json.dumps(body).encode()
+            # A caller can spell the name in any case. setdefault sees only the
+            # exact spelling, so it would add a second, wrong media type and
+            # send application/json for a JSON patch or for an attachment.
+            if _find_header(headers, "Content-Type") is None:
+                headers["Content-Type"] = "application/json"
+        for attempt in range(self._retries + 1):
+            request = urllib.request.Request(url, data=data, method=method)
+            for key, value in headers.items():
+                request.add_header(key, value)
+            try:
+                with self._opener(request) as response:
+                    return response.status, response.read(), dict(response.headers)
+            except urllib.error.HTTPError as error:
+                payload = error.read() or b""
+                if _may_retry(method, error.code) and attempt < self._retries:
+                    self._sleep(_retry_after(error.headers))
+                    continue
+                raise HttpError(error.code, payload.decode("utf-8", "replace")) from None
+
+    def json(self, method, url, body=None, headers=None):
+        _, payload, _ = self.raw(method, url, body, headers)
+        return json.loads(payload) if payload.strip() else {}
+
+    def text(self, method, url, body=None, headers=None):
+        _, payload, _ = self.raw(method, url, body, headers)
+        return payload.decode("utf-8", "replace")
+
+
+def _may_retry(method, status):
+    if str(method).upper() == "POST":
+        return status in POST_RETRY_STATUS
+    # GET, HEAD, PUT, PATCH, and DELETE reach the same end state on a replay.
+    return status in RETRY_STATUS
+
+
+def _find_header(headers, name):
+    """Returns a header value in any case. Returns None when the name is absent.
+
+    HTTP/2 sends every header name in lowercase, and Azure, Jira, and GitHub all
+    serve HTTP/2. A plain dict lookup misses those names, so the server delay
+    goes unread and every rate-limited retry waits the default time.
+    """
+    wanted = name.lower()
+    for key, value in dict(headers or {}).items():
+        if str(key).lower() == wanted:
+            return value
+    return None
+
+
+def _retry_after(headers):
+    value = _find_header(headers, "Retry-After")
+    try:
+        return float(1 if value is None else value)
+    except (TypeError, ValueError):
+        return 1.0
+
+
+def basic(user, token):
+    return "Basic " + base64.b64encode(f"{user}:{token}".encode()).decode()

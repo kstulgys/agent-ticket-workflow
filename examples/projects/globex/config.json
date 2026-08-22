@@ -1,0 +1,38 @@
+{
+  "slug": "globex",
+  "match": {
+    "ticket_patterns": ["^DIST-[0-9]+$"],
+    "tracker_urls": ["globex.atlassian.net"],
+    "repo_paths": ["~/Repositories/Globex.Dist.WebPlatform"]
+  },
+  "tracker": {
+    "kind": "jira",
+    "site": "https://globex.atlassian.net",
+    "project": "DIST",
+    "auth_env": { "email": "JIRA_EMAIL", "token": "JIRA_TOKEN" }
+  },
+  "host": {
+    "kind": "github",
+    "owner": "globex-dist",
+    "repo": "Globex.Dist.WebPlatform",
+    "local_path": "~/Repositories/Globex.Dist.WebPlatform",
+    "base_branch": "main",
+    "branch_pattern": "fix/{id}-{slug}",
+    "commit_subject": "{id}: {summary}",
+    "screenshot_branch": "pr-screenshots",
+    "identity": { "name": "devuser", "email": "dev@example.com" },
+    "auth_env": { "token": "GH_TOKEN" }
+  },
+  "buckets": {
+    "fixable-here": { "state": "In Progress", "assignee": "self" },
+    "owned-elsewhere": { "state": "To Do", "assignee": "backend" },
+    "split": { "state": "To Do", "assignee": "backend" },
+    "needs-clarification": { "state": null, "assignee": null }
+  },
+  "people": {
+    "self": { "accountId": "712020:db94cfd4-ccce-4d48-bdab-0b1fae2b31a3" },
+    "backend": { "accountId": "557058:eb56070b-6c45-484c-a2f8-920e85d982ea" }
+  },
+  "deploy_gate": { "state": "Ready for Test" },
+  "notes": "notes.md"
+}
