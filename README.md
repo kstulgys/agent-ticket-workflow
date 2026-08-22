@@ -120,14 +120,14 @@ and opens the pull request on GitHub. The phases do not change.
 ## What it never does
 
 - Merge. It opens the pull request, reports the url, and stops there.
-- Invent a behaviour the ticket does not state. A missing string goes back as one
-  question, and user-facing copy in another language always does.
+- Invent a behaviour the ticket does not state. A missing string goes back as
+  one question, and user-facing copy in another language always does.
 - Guess that a build reached the test environment. The deploy-gated state moves
   on your word, never on a merge.
 - Resolve a reviewer's thread. It replies and leaves the thread open, because
   closing it hides the ask from that reviewer's queue.
-- Link a work item type the profile refuses. A merge completes every linked item,
-  and a bug has to reach its test pass instead.
+- Link a work item type the profile refuses. A merge completes every linked
+  item, and a bug has to reach its test pass instead.
 
 ## How it works
 
