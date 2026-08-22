@@ -21,6 +21,114 @@ This skill answers both. Every ticket gets a bucket, a comment, and its routing
 applied. A bucket is one of four names for the work that remains, and it decides
 the state, the owner, and what the comment says.
 
+## Use cases
+
+Each case starts with what you type. The skill picks the mode and the phases
+from there.
+
+### One ticket, start to finish
+
+> work 59644
+
+The agent finds which project owns 59644, then reads the ticket whole:
+description, every comment, the attachments, and any child task that names the
+actual mechanism. It traces the cause, writes the failing test, makes the
+change, runs that project's verify gate, and opens the pull request with the
+ticket linked and the profile's reviewer added. Then it comments and applies the
+routing for `fixable-here`, which on the northwind example is In Progress and
+assigned to you.
+
+You get a pull request url. Merging stays your call.
+
+### The fix belongs to another team
+
+> DIST-4471
+
+The trace ends outside this repo. The API never sends the field, so there is
+nothing here to change, and no branch and no pull request. The bucket is
+`owned-elsewhere`, and the comment names the concrete fix: the mapper, the
+field, or the flag. Routing follows the profile. Globex moves the ticket to To
+Do and hands it to the backend owner. Northwind writes no state, so the comment
+carries the whole handover. On a GitHub tracker a bucket state is a label, so
+the routing shows on the ticket itself.
+
+The investigation leaves your session with the ticket. An `owned-elsewhere`
+ticket without that comment counts as unfinished.
+
+### The ticket cannot be answered yet
+
+> look at 61002
+
+The ticket says the checkout wording is wrong and never says what it should be.
+No comment supplies it either. The agent does not invent user-facing copy, and
+copy in a language it cannot verify is always the product owner's to write. The
+bucket is `needs-clarification`, and the comment asks one question: which
+string, which screen, which language.
+
+### Everything assigned to you
+
+> work on the tickets assigned to me
+
+`tk mine` answers once for every configured project, so an Azure Boards ticket
+and a Jira ticket arrive in the same list. Each row carries its own project
+slug, so each ticket uses its own branch pattern, states, and owners.
+Independent tickets can run at the same time instead of one after another.
+
+The run ends with one block per pull request, url then title, with nothing
+around it. Paste that where you need it. A project that did not answer is named
+with its reason, so you always know why a list is short.
+
+### Review comments came back
+
+> 59644 has comments
+
+This is resume mode. The threads on the pull request, plus any ticket comment
+newer than your last update, are the whole spec for the pass. The description is
+already implemented on that branch, so re-reading it concludes "already done"
+and wastes the run. The agent commits onto the branch that is already there,
+replies in each thread, and leaves the reviewer's thread open, because resolving
+it hides the ask from their queue. When the change renamed something the
+description names, the description gets fixed in the same pass.
+
+### A build reached the test environment
+
+> the tickets are on TST
+
+That sentence is the only thing that moves a ticket to the deploy-gated state.
+`tk state <id> --gate` writes it. Nothing infers the step from a merge, so a
+ticket never reaches a tester's queue before the build does.
+
+The reverse case is a tester saying the fix does not work. Then the first check
+is the pull request and the environment, not the code. Merged is not deployed.
+
+### The ticket links a Figma frame
+
+> 58120
+
+A Figma url in a ticket is an instruction to read the frame. The agent renders
+it and prints resolved values, hex, pixels, font sizes, then builds against
+those numbers instead of eyeballing a screenshot. Mapping a value back to a
+brand token stays a manual step, because the Figma variables endpoint is
+Enterprise only.
+
+### A Jira ticket that ships through GitHub
+
+The tracker and the pull request host are separate blocks in one profile, so
+they do not have to match. `examples/projects/globex` reads DIST keys from Jira
+and opens the pull request on GitHub. The phases do not change.
+
+## What it never does
+
+- Merge. It opens the pull request, reports the url, and stops there.
+- Invent a behaviour the ticket does not state. A missing string goes back as one
+  question, and user-facing copy in another language always does.
+- Guess that a build reached the test environment. The deploy-gated state moves
+  on your word, never on a merge.
+- Resolve a reviewer's thread. It replies and leaves the thread open, because
+  closing it hides the ask from that reviewer's queue.
+- Link a work item type the profile refuses. A merge completes every linked item,
+  and a bug has to reach its test pass instead.
+
 ## How it works
 
 Two parts, split on purpose.
