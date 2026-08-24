@@ -181,60 +181,72 @@ which is the same as the repository name:
 ```bash
 git clone https://github.com/kstulgys/agent-ticket-workflow.git \
   ~/.claude/skills/agent-ticket-workflow
-cd ~/.claude/skills/agent-ticket-workflow
 ```
 
-Then run the wizard. It installs the Superpowers plugin, then walks you through
-one provider at a time and writes each token to `secrets.env`:
+That is the whole install. There is no setup step, no token to mint yet, and no
+config file to write. The skill asks for a credential the first time one is
+refused, and for one provider only.
 
-```bash
-scripts/setup.sh
+### Or paste this to your agent
+
+```
+Install the agent-ticket-workflow skill for me.
+
+1. Clone https://github.com/kstulgys/agent-ticket-workflow into
+   ~/.claude/skills/agent-ticket-workflow. The directory name has to be exactly
+   agent-ticket-workflow, because the skill name and the directory name must
+   match.
+2. From that directory, run: python3 -m unittest discover -s tests -t tests
+   Tell me the result.
+3. Do not mint any token, do not run scripts/setup.sh, and do not write any
+   config file or project profile. The skill asks for what it needs when it
+   needs it.
+4. Then tell me it is ready, and that I start a job by typing: work on <ticket>
 ```
 
-Run one step on its own with `scripts/setup.sh superpowers`, or `azure`, `jira`,
-`github`, or `figma`.
+## First run
 
-The wizard asks for your Azure DevOps organization and your Atlassian site,
-because no default can be right. Set `AZDO_ORG` and `JIRA_SITE` in the
-environment to answer without a prompt.
+Open the repository the ticket belongs to and type:
 
-## Set up a project
-
-Copy an example and edit it:
-
-```bash
-mkdir -p ~/.claude/ticket-workflow/projects/myproject
-cp examples/projects/northwind/config.json \
-  examples/projects/northwind/notes.md \
-  ~/.claude/ticket-workflow/projects/myproject/
+```
+work on 5438
 ```
 
-The directory name is the project slug, and `tk` keys every profile by it.
-Change the `slug` field in `config.json` to that same name. Messages built from
-the profile print that field, so a stale value names a project you do not have.
+With no profile for that project, the agent reads the git remote first. The
+remote names the provider, the owner, the repository, and on Azure DevOps the
+organization and the project. It asks you for the tracker only when the remote
+cannot name it, and that question is a select of three: GitHub, Azure Boards,
+Jira. Then it runs one wizard stage for that provider's token, and that stage
+writes the value to `secrets.env` itself. You never paste a token into the chat.
+Last, it writes the profile with `tk init`.
 
-`notes.md` holds what a decision needs. Phase 1 of the routine reads it before
-it touches code, so an empty one costs a run.
+Three questions are left, and no machine can answer them:
+
+- The verify gate. The exact commands that prove a change in this repository,
+  and what a clean run prints. This one costs a run when it stays empty, because
+  a fix then ships on a claim instead of on evidence.
+- The board column for each bucket. Your board's own state names.
+- The state a tested build reaches, and the word that releases it.
+
+The agent asks for each one the first time it is needed, not before.
+
+Your profile lives in `~/.claude/ticket-workflow/projects/<slug>/`, outside this
+repository. Nothing about your projects is ever committed here.
 
 `examples/projects/northwind` is an Azure Boards tracker with an Azure Repos
 host. `examples/projects/globex` is a Jira tracker with a GitHub host, which
-shows the two provider case. `references/profiles.md` documents every key.
+shows the two provider case. Both are worked examples for a profile written by
+hand, and `references/profiles.md` documents every key.
 
-Then check it:
-
-```bash
-scripts/tk doctor
-```
-
-`doctor` reads each provider, then reads a real ticket through it. Two calls,
-because they fail apart: a token can name the right account and still read no
-ticket. Exit 0 means every provider answered. Exit 1 prints one row per provider
-with its own `ok`, and a `fix` command per gap.
+To set a provider up before your first ticket, run `scripts/setup.sh <provider>`
+for the one you want, and `scripts/tk doctor` to see what is configured.
 
 ## Verbs
 
 ```
 tk doctor                     every provider and every project
+tk detect                     what the working directory knows
+tk init --slug S --tracker T  write a project profile
 tk resolve <id|key|url>       which project owns this ticket
 tk mine                       tickets assigned to you
 tk show <id>                  the normalised ticket, with its comments
@@ -255,7 +267,7 @@ and a human must choose.
 python3 -m unittest discover -s tests -t tests
 ```
 
-388 tests, no network. Every provider response is a fixture, and a test that
+483 tests, no network. Every provider response is a fixture, and a test that
 queues one asserts the queue drained, so a call the code never makes fails the
 test.
 
