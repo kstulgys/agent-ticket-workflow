@@ -3,6 +3,7 @@ import base64
 import json
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 from . import secrets
@@ -25,6 +26,12 @@ TIMEOUT = 30
 # unclamped value sleeps it twice with nothing on stdout. A capped wait can hit
 # 429 again and fail, and a clear failure beats a silent stall.
 MAX_RETRY_AFTER = 30
+# A redirect to another host must not carry the credential. The standard
+# library copies every header except the two content headers into the new
+# request, so Authorization survives a hop off the vendor. The Jira attachment
+# route answers 303 to a media host, and an Azure attachment url comes out of
+# the work item payload, so neither target is a value this profile named.
+_AUTH_HEADERS = ("authorization", "x-figma-token", "cookie")
 
 
 class HttpError(Exception):
@@ -34,9 +41,36 @@ class HttpError(Exception):
         super().__init__(f"HTTP {status}: {self.body}")
 
 
+def _same_host(before, after):
+    """True when scheme and host match, so a credential may travel."""
+    one, two = urllib.parse.urlsplit(before), urllib.parse.urlsplit(after)
+    return (one.scheme, one.netloc) == (two.scheme, two.netloc)
+
+
+class _StripAuthAcrossHosts(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        following = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if following is None:
+            return None
+        if _same_host(req.full_url, following.full_url):
+            return following
+        for name in _AUTH_HEADERS:
+            # Request stores a header name under key.capitalize(), both when
+            # add_header sets it and when the constructor copies it across a
+            # redirect. remove_header does not capitalise, so spell it here.
+            following.remove_header(name.capitalize())
+        return following
+
+
+# One opener for the process. build_opener keeps the default handler set and
+# replaces the redirect handler with the one above. Building it per request
+# would drop connection reuse and add no safety.
+_OPENER = urllib.request.build_opener(_StripAuthAcrossHosts())
+
+
 class Http:
     def __init__(self, opener=None, sleep=None, retries=2, timeout=TIMEOUT):
-        self._opener = opener or urllib.request.urlopen
+        self._opener = opener or _OPENER.open
         self._sleep = sleep or time.sleep
         self._retries = retries
         self._timeout = timeout

@@ -169,17 +169,20 @@ class Jira:
         out = []
         for item in items:
             # The provider owns the name, so treat it as untrusted input.
-            # safe_name keeps the write inside the target, and free_path keeps
+            # safe_name keeps the write inside the target, and write_new keeps
             # two screenshots that share a name as two files.
             name = util.safe_name(item.get("filename"))
             path = None
             if target:
-                path = util.free_path(target, name)
-                _, payload, _ = self.http.raw(
+                # Fetch, check, then write. Any 2xx body used to land on disk
+                # under the attachment name, so a sign-in page was saved as a
+                # screenshot and reported as a good download.
+                status, payload, _ = self.http.raw(
                     "GET", self._url(f"attachment/content/{item['id']}"),
                     headers=self._headers())
-                with open(path, "wb") as fh:
-                    fh.write(payload)
+                if status != 200 or not payload:
+                    raise http.HttpError(status, f"no attachment body for {name}")
+                path = util.write_new(target, name, payload)
             out.append({"filename": name, "path": path, "mime": item.get("mimeType")})
         return out
 

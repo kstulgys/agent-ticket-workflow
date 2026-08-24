@@ -93,6 +93,19 @@ class Azure:
         join = "&" if "?" in url else "?"
         return f"{url}{join}api-version={version or self.version}"
 
+    def _own_url(self, url):
+        """A payload url this token may carry a credential to.
+
+        An attachment url arrives inside the work item, so it is provider data,
+        not a value this profile named. A request to any other host would hand
+        the PAT to whoever the payload names.
+        """
+        if not str(url).startswith(self.org + "/"):
+            raise ValueError(
+                f"profile {self.slug} received an attachment url outside "
+                f"{self.org}. tk does not send the credential there.")
+        return url
+
     def _get(self, url):
         return self.http.json("GET", url, headers=self._headers())
 
@@ -231,11 +244,15 @@ class Azure:
             name = util.safe_name((relation.get("attributes") or {}).get("name"))
             path = None
             if target:
-                path = util.free_path(target, name)
-                _, payload, _ = self.http.raw(
-                    "GET", self._versioned(relation["url"]), headers=self._headers())
-                with open(path, "wb") as fh:
-                    fh.write(payload)
+                # Fetch, check, then write. Any 2xx body used to land on disk
+                # under the attachment name, so a sign-in page was saved as a
+                # screenshot and reported as a good download.
+                status, payload, _ = self.http.raw(
+                    "GET", self._versioned(self._own_url(relation["url"])),
+                    headers=self._headers())
+                if status != 200 or not payload:
+                    raise http.HttpError(status, f"no attachment body for {name}")
+                path = util.write_new(target, name, payload)
             out.append({"filename": name, "path": path, "mime": None})
         return out
 

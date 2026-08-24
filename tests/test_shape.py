@@ -180,3 +180,38 @@ class TestFreePath(unittest.TestCase):
             self.assertEqual(path, os.path.join(target, expected))
             with open(path, "wb") as fh:
                 fh.write(b"x")
+
+
+class TestWriteNew(unittest.TestCase):
+    def test_the_bytes_land_under_the_target(self):
+        target = self.enterContext(tempfile.TemporaryDirectory())
+        path = util.write_new(target, "shot.png", b"\x89PNG")
+        self.assertEqual(path, os.path.join(target, "shot.png"))
+        with open(path, "rb") as fh:
+            self.assertEqual(fh.read(), b"\x89PNG")
+
+    def test_a_second_file_with_one_name_keeps_both(self):
+        # Two pasted screenshots on one ticket is the ordinary case. Without a
+        # second name the first download is lost and both records point at the
+        # same bytes.
+        target = self.enterContext(tempfile.TemporaryDirectory())
+        first = util.write_new(target, "shot.png", b"one")
+        second = util.write_new(target, "shot.png", b"two")
+        self.assertNotEqual(first, second)
+        self.assertEqual(sorted(os.listdir(target)), ["shot-1.png", "shot.png"])
+        with open(first, "rb") as fh:
+            self.assertEqual(fh.read(), b"one")
+
+    def test_a_symlink_at_the_name_is_never_written_through(self):
+        # A dangling link is the sharp case. exists follows it and answers
+        # False, so the old open created the file the link named, outside the
+        # target. The payload must land beside the link instead.
+        root = self.enterContext(tempfile.TemporaryDirectory())
+        target = os.path.join(root, "att")
+        os.mkdir(target)
+        outside = os.path.join(root, "outside.txt")
+        os.symlink(outside, os.path.join(target, "shot.png"))
+        path = util.write_new(target, "shot.png", b"payload")
+        self.assertEqual(path, os.path.join(target, "shot-1.png"))
+        self.assertFalse(os.path.exists(outside))
+        self.assertEqual(os.listdir(root), ["att"])

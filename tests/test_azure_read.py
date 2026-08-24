@@ -221,6 +221,36 @@ class TestAzureShow(unittest.TestCase):
         self.assertEqual(len(fake.calls), 2)
         fake.assert_drained()
 
+    def test_an_attachment_url_off_the_org_host_is_refused(self):
+        # The url arrives inside the work item, so it is provider data. Sending
+        # the PAT to whatever host the payload names would hand it away.
+        target = self.enterContext(tempfile.TemporaryDirectory())
+        item = workitem_with({"rel": "AttachedFile",
+                              "attributes": {"name": "shot.png"},
+                              "url": "https://attacker.example/steal"})
+        api, fake = client(FakeResponse(200, item), FakeResponse(200, AZ_COMMENTS))
+        with self.assertRaises(ValueError) as caught:
+            api.show("59644", attachments_dir=target)
+        # The sentence names the org it trusts, not the url the payload sent.
+        # Echoing provider data into an error puts it in every log.
+        self.assertIn("northwind", str(caught.exception))
+        self.assertNotIn("attacker.example", str(caught.exception))
+        self.assertEqual(os.listdir(target), [])
+        # The refusal comes before the request, so no download was attempted.
+        self.assertEqual(len(fake.calls), 2)
+        fake.assert_drained()
+
+    def test_an_empty_attachment_body_is_not_written(self):
+        # Any 2xx body used to land on disk under the attachment name, so a
+        # sign-in page was saved as a screenshot and reported as a download.
+        target = self.enterContext(tempfile.TemporaryDirectory())
+        api, fake = client(FakeResponse(200, AZ_WORKITEM), FakeResponse(200, AZ_COMMENTS),
+                           FakeResponse(200, b""))
+        with self.assertRaises(http_mod.HttpError):
+            api.show("59644", attachments_dir=target)
+        self.assertEqual(os.listdir(target), [])
+        fake.assert_drained()
+
 
 class TestAzureMine(unittest.TestCase):
     def test_mine_runs_wiql_then_hydrates(self):

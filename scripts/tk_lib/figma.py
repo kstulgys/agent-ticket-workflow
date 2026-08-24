@@ -87,7 +87,13 @@ class Figma:
             # answer it expects must not raise on the other answer.
             return {"path": None, "node": node, "bytes": None,
                     "error": f"no render for node {node}"}
-        _, payload, _ = self.http.raw("GET", image)
+        status, payload, _ = self.http.raw("GET", image)
+        # A render is a png. Any other body is an error page, and writing it
+        # would report a good render for a file no viewer can open.
+        if status != 200 or not payload.startswith(b"\x89PNG\r\n\x1a\n"):
+            return {"path": None, "node": node, "bytes": None,
+                    "error": f"the render for node {node} came back as "
+                             f"{len(payload)} bytes that are not a png"}
         with open(out_path, "wb") as fh:
             fh.write(payload)
         return {"path": out_path, "node": node, "bytes": len(payload), "error": None}

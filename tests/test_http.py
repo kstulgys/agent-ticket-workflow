@@ -1,6 +1,7 @@
 import io
 import unittest
 import urllib.error
+import urllib.request
 
 import helpers  # noqa: F401
 from helpers import FakeResponse
@@ -182,3 +183,45 @@ class TestHttp(unittest.TestCase):
             client.json("GET", "http://x")
         self.assertEqual(cm.exception.status, 203)
         self.assertIn("sign in", cm.exception.body)
+
+
+class TestRedirectCredentials(unittest.TestCase):
+    """The handler under the default opener, driven the way urllib drives it."""
+
+    def following(self, before, after):
+        request = urllib.request.Request(before)
+        request.add_header("Authorization", "Basic secret")
+        request.add_header("X-Figma-Token", "figd_secret")
+        request.add_header("Cookie", "tenant.session.token=abc")
+        request.add_header("Accept", "application/json")
+        handler = http._StripAuthAcrossHosts()
+        return handler.redirect_request(request, None, 302, "Found", {}, after)
+
+    def test_a_hop_to_another_host_drops_every_credential(self):
+        # The standard library copies every header but the two content headers
+        # into the redirected request, so the token used to follow the hop. The
+        # Jira attachment route answers 303 to a media host.
+        out = self.following("https://globex.atlassian.net/a",
+                             "https://api.media.atlassian.com/x")
+        # Read the dict, not get_header, so a header under another spelling
+        # cannot pass this test.
+        self.assertEqual(out.headers, {"Accept": "application/json"})
+
+    def test_a_hop_on_the_same_host_keeps_them(self):
+        out = self.following("https://globex.atlassian.net/a",
+                             "https://globex.atlassian.net/b")
+        self.assertEqual(out.get_header("Authorization"), "Basic secret")
+        self.assertEqual(out.get_header("Cookie"), "tenant.session.token=abc")
+
+    def test_a_downgrade_to_http_counts_as_another_host(self):
+        # Same name, no encryption. Sending the credential there is the same
+        # mistake as sending it to a stranger.
+        out = self.following("https://dev.azure.com/a", "http://dev.azure.com/a")
+        self.assertIsNone(out.get_header("Authorization"))
+
+    def test_the_default_opener_uses_the_handler(self):
+        # A test that only drives the class would still pass if the opener were
+        # never wired up.
+        kinds = [type(h).__name__ for h in http._OPENER.handlers]
+        self.assertIn("_StripAuthAcrossHosts", kinds)
+        self.assertNotIn("HTTPRedirectHandler", kinds)

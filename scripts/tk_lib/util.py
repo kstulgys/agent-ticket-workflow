@@ -7,6 +7,10 @@ _LINE_END = re.compile(r"\r\n?")
 _BLANK_LINES = re.compile(r"\n{2,}")
 _HOLE = re.compile(r"\{(\w+)\}")
 FALLBACK_NAME = "attachment"
+# A bound on the name search. free_path answers a name that is free now, and
+# the open below can still lose it to another writer. Without a bound, a
+# directory somebody keeps filling would spin the loop for ever.
+FREE_TRIES = 50
 
 
 def one_line_ending(text):
@@ -78,19 +82,47 @@ def safe_name(name):
 
 
 def free_path(target, name):
-    """A path under target that no file holds yet.
+    """A path under target that no name holds yet.
 
     Two attachments on one ticket often share a name. Without the number the
     second download overwrites the first, and both records then point at the
     same bytes with nothing to say one went missing.
+
+    lexists, not exists, because exists follows a symlink and answers False for
+    a dangling one. write_new opens with O_EXCL, which refuses the link itself,
+    so exists here would hand back the same taken name on every try and the
+    retry could never move on.
     """
     stem, ext = os.path.splitext(name)
     path = os.path.join(target, name)
     count = 1
-    while os.path.exists(path):
+    while os.path.lexists(path):
         path = os.path.join(target, f"{stem}-{count}{ext}")
         count += 1
     return path
+
+
+def write_new(target, name, payload):
+    """Writes payload under target as name, without following a link.
+
+    free_path picks a free name, and os.path.exists follows a symlink and
+    answers False for a dangling one. So the open below refuses a link and
+    refuses an existing file, and a collision asks free_path for the next name.
+    That folds the choice and the write into one step, with no window between
+    them.
+    """
+    for _ in range(FREE_TRIES):
+        path = free_path(target, name)
+        try:
+            handle = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                             | os.O_NOFOLLOW, 0o600)
+        except FileExistsError:
+            continue
+        with os.fdopen(handle, "wb") as fh:
+            fh.write(payload)
+        return path
+    raise OSError(f"no free name for {name} under {target} after "
+                  f"{FREE_TRIES} tries")
 
 
 def name_set(value):

@@ -17,6 +17,10 @@ IMAGES_URL = (f"https://api.figma.com/v1/images/{KEY}"
 NODES_URL = f"https://api.figma.com/v1/files/{KEY}/nodes?ids=15114%3A38905"
 FILE_URL = "https://www.figma.com/file/KEY123/N"
 FILE_TREE_URL = "https://api.figma.com/v1/files/KEY123?depth=2"
+# The real eight byte signature. A render that does not start with it is an
+# error page, and writing that reports a good render for a file no viewer
+# opens.
+PNG = b"\x89PNG\r\n\x1a\nIHDR"
 
 
 class TestParseUrl(unittest.TestCase):
@@ -77,10 +81,11 @@ class TestRenderAndSpecs(unittest.TestCase):
         root = self.enterContext(tempfile.TemporaryDirectory())
         target = str(pathlib.Path(root, "frame.png"))
         fake = FakeHttp([FakeResponse(200, {"images": {"15114:38905": "https://s3/i.png"}}),
-                         FakeResponse(200, b"\x89PNG")])
+                         FakeResponse(200, PNG)])
         got = figma.Figma(VALUES, fake).render(URL, target)
         self.assertEqual(got["path"], target)
         self.assertIsNone(got["error"])
+        self.assertEqual(got["bytes"], len(PNG))
         self.assertEqual(fake.calls[0]["url"], IMAGES_URL)
         self.assertEqual(fake.calls[1]["url"], "https://s3/i.png")
         self.assertEqual(fake.calls[0]["headers"]["X-Figma-Token"], VALUES["FIGMA_TOKEN"])
@@ -88,7 +93,23 @@ class TestRenderAndSpecs(unittest.TestCase):
         # on that request makes the store refuse it.
         self.assertEqual(fake.calls[1]["headers"], {})
         with open(target, "rb") as fh:
-            self.assertEqual(fh.read(), b"\x89PNG")
+            self.assertEqual(fh.read(), PNG)
+        fake.assert_drained()
+
+    def test_a_render_that_is_not_a_png_is_refused(self):
+        # The store can answer 200 with a sign-in page. Writing it reported a
+        # good render, and references/figma.md tells the agent to trust error
+        # before it opens the file.
+        root = self.enterContext(tempfile.TemporaryDirectory())
+        target = str(pathlib.Path(root, "frame.png"))
+        fake = FakeHttp([FakeResponse(200, {"images": {"15114:38905": "https://s3/i.png"}}),
+                         FakeResponse(200, b"<html>sign in</html>")])
+        got = figma.Figma(VALUES, fake).render(URL, target)
+        self.assertIsNone(got["path"])
+        self.assertIsNone(got["bytes"])
+        self.assertIn("not a png", got["error"])
+        self.assertEqual(got["node"], "15114:38905")
+        self.assertFalse(pathlib.Path(target).exists())
         fake.assert_drained()
 
     def test_render_without_an_image_reports_the_node(self):
