@@ -60,16 +60,32 @@ AZ_HOSTED = dict(AZ, host={"kind": "azure-repos", "repo": "Contoso.migration",
 
 
 class Recorder:
+    """The tracker half of an adapter. It records what the verb sent.
+
+    Each answer defaults to success. A test that drives the failure path sets
+    the matching attribute before the call, so one double serves both paths.
+    """
+
     def __init__(self):
         self.calls = []
+        self.commented = {"ok": True, "stored": "text", "id": 1}
+        self.written = True
+
+    def show(self, ticket, attachments_dir=None):
+        self.calls.append(("show", ticket, attachments_dir))
+        return {"type": "Task"}
+
+    def comment(self, ticket, text):
+        self.calls.append(("comment", ticket, text))
+        return dict(self.commented)
 
     def state(self, ticket, value, item_type=None):
         self.calls.append(("state", ticket, value, item_type))
-        return {"ok": True, "stored": value}
+        return {"ok": self.written, "stored": value}
 
     def assign(self, ticket, who):
         self.calls.append(("assign", ticket, who))
-        return {"ok": True, "stored": who}
+        return {"ok": self.written, "stored": who}
 
 
 class TestBucketApply(unittest.TestCase):
@@ -468,10 +484,16 @@ class TestFigmaVerb(unittest.TestCase):
 
 
 class FakeHost:
-    """The pull request half of an adapter. It records what the verb sent."""
+    """The pull request half of an adapter. It records what the verb sent.
+
+    Each answer defaults to success, in the shape the real adapters return. A
+    test that drives the failure path sets the matching attribute first.
+    """
 
     def __init__(self):
         self.calls = []
+        self.reply = {"ok": True, "stored": "text"}
+        self.attachment = {"url": "u", "ok": True, "markdown": "![a](u)"}
 
     def pr_create(self, head, title, body, base=None, links=(), reviewer=None):
         self.calls.append(("create", head, title, body, base, list(links), reviewer))
@@ -485,6 +507,14 @@ class FakeHost:
     def pr_describe(self, pr, body):
         self.calls.append(("describe", pr, body))
         return {"ok": True, "stored": body, "unlinked": []}
+
+    def pr_comment(self, pr, text, reply_to=None):
+        self.calls.append(("comment", pr, text, reply_to))
+        return dict(self.reply)
+
+    def pr_attach(self, pr, path):
+        self.calls.append(("attach", pr, path))
+        return dict(self.attachment)
 
 
 class TestPrVerb(unittest.TestCase):
@@ -671,6 +701,52 @@ class TestPrVerb(unittest.TestCase):
         self.assertIn("describe", payload["message"])
         self.assertEqual(self.host.calls, [])
 
+    def test_a_stored_pr_comment_exits_zero(self):
+        self.no_tracker()
+        code, payload = self.run_pr(["comment", "--slug", "globex", "--pr", "6453",
+                                     "--body-file", self.body_file("review reply")])
+        self.assertEqual(code, 0)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(self.host.calls,
+                         [("comment", "6453", "review reply", None)])
+
+    def test_a_pr_comment_the_server_did_not_store_exits_one(self):
+        self.no_tracker()
+        self.host.reply = {"ok": False, "stored": None}
+        code, payload = self.run_pr(["comment", "--slug", "globex", "--pr", "6453",
+                                     "--body-file", self.body_file("review reply")])
+        self.assertEqual(code, 1)
+        self.assertFalse(payload["ok"])
+
+    def test_an_upload_that_matches_the_bytes_exits_zero(self):
+        self.no_tracker()
+        code, payload = self.run_pr(["attach", "--slug", "globex", "--pr", "6453",
+                                     "--file", self.body_file("shot")])
+        self.assertEqual(code, 0)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(self.host.calls[0][0], "attach")
+
+    def test_a_short_upload_exits_one(self):
+        # A short upload still answers with a url, and the markdown then points
+        # at a broken image. The adapter compares the bytes and says so.
+        self.no_tracker()
+        self.host.attachment = {"url": "u", "ok": False, "markdown": "![a](u)"}
+        code, payload = self.run_pr(["attach", "--slug", "globex", "--pr", "6453",
+                                     "--file", self.body_file("shot")])
+        self.assertEqual(code, 1)
+        self.assertFalse(payload["ok"])
+
+    def test_an_answer_with_no_ok_key_exits_zero(self):
+        # pr create answers six keys and no ok on purpose, so the verb tests
+        # `is False` rather than truthiness. A simplification to `not ok` would
+        # turn every successful pull request into exit 1.
+        self.no_tracker()
+        code, payload = self.run_pr(["create", "--slug", "globex",
+                                     "--head", "feature/x", "--title", "t",
+                                     "--body-file", self.body_file("body")])
+        self.assertEqual(code, 0)
+        self.assertNotIn("ok", payload)
+
 
 class FakeProvider:
     """The two calls doctor makes on any adapter."""
@@ -802,6 +878,109 @@ class TestStateVerb(unittest.TestCase):
         code, payload = self.run_state(["59644"])
         self.assertEqual(code, 1)
         self.assertIn("--bucket", payload["message"])
+
+
+class TestTrackerWriteVerbs(unittest.TestCase):
+    """Every verb that changes a ticket turns the adapter's ok into an exit code.
+
+    That line was untested on all four verbs. The routine reads the exit code to
+    decide whether the write landed, so an exit 0 on a refused write would have
+    the agent record a comment the server never stored and move on.
+    """
+
+    def setUp(self):
+        self.rec = Recorder()
+        self.enterContext(mock.patch.object(verbs.secrets, "load", lambda: VALUES))
+        self.enterContext(mock.patch.object(verbs.config, "load_all",
+                                            lambda: {"northwind": PROFILE}))
+        self.enterContext(mock.patch.object(
+            verbs.cli, "adapter_for", lambda p, v, c=None: self.rec))
+
+    def run_verb(self, name, argv):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = cli.VERBS[name](argv)
+        return code, json.loads(out.getvalue())
+
+    def body_file(self, text):
+        path = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory()), "b.md")
+        path.write_text(text, encoding="utf-8")
+        return str(path)
+
+    def test_a_stored_comment_exits_zero(self):
+        code, payload = self.run_verb(
+            "comment", ["59644", "--slug", "northwind",
+                        "--body-file", self.body_file("hello")])
+        self.assertEqual(code, 0)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(self.rec.calls, [("comment", "59644", "hello")])
+
+    def test_a_comment_the_server_did_not_store_exits_one(self):
+        self.rec.commented = {"ok": False, "stored": None, "id": 1}
+        code, payload = self.run_verb(
+            "comment", ["59644", "--slug", "northwind",
+                        "--body-file", self.body_file("hello")])
+        self.assertEqual(code, 1)
+        # The answer still prints. The routine reads stored to see what landed.
+        self.assertFalse(payload["ok"])
+        self.assertIn("stored", payload)
+
+    def test_a_bucket_that_lands_exits_zero(self):
+        code, payload = self.run_verb(
+            "state", ["59644", "--slug", "northwind", "--bucket", "fixable-here",
+                      "--type", "Task"])
+        self.assertEqual(code, 0)
+        self.assertTrue(payload["ok"])
+
+    def test_a_bucket_the_server_refused_exits_one(self):
+        self.rec.written = False
+        code, payload = self.run_verb(
+            "state", ["59644", "--slug", "northwind", "--bucket", "fixable-here",
+                      "--type", "Task"])
+        self.assertEqual(code, 1)
+        self.assertFalse(payload["ok"])
+
+    def test_the_gate_that_lands_exits_zero(self):
+        code, payload = self.run_verb(
+            "state", ["59614", "--slug", "northwind", "--gate", "--type", "Bug"])
+        self.assertEqual(code, 0)
+        self.assertEqual(self.rec.calls[0][2], {"Bug": "Ready for Test"})
+
+    def test_a_gate_the_server_refused_exits_one(self):
+        self.rec.written = False
+        code, payload = self.run_verb(
+            "state", ["59614", "--slug", "northwind", "--gate", "--type", "Bug"])
+        self.assertEqual(code, 1)
+        self.assertFalse(payload["ok"])
+
+    def test_no_type_argument_reads_the_type_once(self):
+        # That read is a full ticket fetch on Azure, every comment page
+        # included. A change that made it unconditional would be expensive and
+        # silent.
+        code, _ = self.run_verb(
+            "state", ["59644", "--slug", "northwind", "--bucket", "fixable-here"])
+        self.assertEqual(code, 0)
+        self.assertEqual([call[0] for call in self.rec.calls].count("show"), 1)
+
+    def test_a_type_argument_reads_nothing_back(self):
+        self.run_verb("state", ["59644", "--slug", "northwind",
+                                "--bucket", "fixable-here", "--type", "Task"])
+        self.assertNotIn("show", [call[0] for call in self.rec.calls])
+
+    def test_an_assign_that_lands_exits_zero(self):
+        code, payload = self.run_verb(
+            "assign", ["59644", "--slug", "northwind", "--owner", "self"])
+        self.assertEqual(code, 0)
+        # The role resolves to the identity the people block holds.
+        self.assertEqual(self.rec.calls, [("assign", "59644", "guid-me")])
+        self.assertTrue(payload["ok"])
+
+    def test_an_assign_the_server_refused_exits_one(self):
+        self.rec.written = False
+        code, payload = self.run_verb(
+            "assign", ["59644", "--slug", "northwind", "--owner", "self"])
+        self.assertEqual(code, 1)
+        self.assertFalse(payload["ok"])
 
 
 if __name__ == "__main__":
