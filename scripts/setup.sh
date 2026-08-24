@@ -153,10 +153,14 @@ finish() {
 # into secrets.env. tk reads that file itself, so a token never goes to the
 # terminal or to a transcript.
 #
-# Run one step with setup.sh superpowers, azure, jira, github, or figma. Run all
-# five with no argument.
+# Run one step with setup.sh superpowers, azure, jira, github, or figma. Name
+# several to run several: setup.sh azure github.
+#
+# A bare run does the Superpowers stage only. A token stage has to be named,
+# because a run needs one provider and the other three questions are noise. The
+# skill runs the stage the provider a ticket lives on needs, when it needs it.
 
-WANT="${*:-superpowers azure jira github figma}"
+WANT="${*:-superpowers}"
 want() { [[ " $WANT " == *" $1 "* ]]; }
 
 for provider in "$@"; do
@@ -165,7 +169,7 @@ for provider in "$@"; do
     *)
       warn "Unknown step: $provider"
       say "Use superpowers, azure, jira, github, or figma."
-      say "No argument runs all five."
+      say "No argument runs the superpowers step only."
       exit 1
       ;;
   esac
@@ -343,8 +347,6 @@ fi
 stage "Lock the file and run the check"
 chmod 600 "$ENV_FILE"
 say "Wrote $ENV_FILE with mode 600."
-say "tk doctor checks every provider, not only the one you set up now."
-say "A gap in another provider is a separate fix, not a fault of this run."
 TK="$(dirname "$0")/tk"
 if [[ ! -x "$TK" ]]; then
   warn "No tk beside this script at $TK."
@@ -353,6 +355,21 @@ if [[ ! -x "$TK" ]]; then
   exit 1
 fi
 
+# doctor reads every profile on disk. With none, its answer is "no project
+# profiles found", which reads as a failed setup right after a token verified.
+# A profile is not this wizard's job: tk init writes one when a ticket needs it.
+shopt -s nullglob
+profiles=("$HOME/.claude/ticket-workflow/projects"/*/config.json)
+shopt -u nullglob
+if (( ${#profiles[@]} == 0 )); then
+  say "No project profile yet, so there is nothing more to check."
+  say "The skill writes one with tk init the first time a ticket needs it."
+  finish
+  exit 0
+fi
+
+say "tk doctor checks every provider, not only the one you set up now."
+say "A gap in another provider is a separate fix, not a fault of this run."
 status=0
 "$TK" doctor || status=$?
 if (( status != 0 )); then
