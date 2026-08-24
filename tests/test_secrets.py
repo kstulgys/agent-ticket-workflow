@@ -21,7 +21,11 @@ def write(test, text, mode=0o600):
 
 class TestSecrets(unittest.TestCase):
     def setUp(self):
+        # SCRUB is process global, and http.basic now registers into it. Clear
+        # on the way in and on the way out, so no test can leak a value into
+        # another and no order makes this file pass alone but fail in the suite.
         secrets.SCRUB.clear()
+        self.addCleanup(secrets.SCRUB.clear)
 
     def test_parses_keys_and_ignores_comments_and_blanks(self):
         path = write(self, '# a comment\n\nAZDO_PAT=abcdefgh12345678\nJIRA_EMAIL="me@x.com"\n')
@@ -69,3 +73,25 @@ class TestSecrets(unittest.TestCase):
     def test_scrub_masks_a_longer_value_that_contains_a_shorter_one(self):
         secrets.load(write(self, "A=abcdefgh\nB=xxabcdefghyy\n"))
         self.assertEqual(secrets.scrub("body xxabcdefghyy body"), "body *** body")
+
+    def test_mask_registers_a_value_that_no_file_holds(self):
+        # A credential travels as Basic and a base64 of the pair. That string is
+        # not in secrets.env, so on every path that scrubs, the form the
+        # credential actually takes could not be masked.
+        secrets.mask("Basic dTphLWxvbmctdG9rZW4=")
+        self.assertEqual(secrets.scrub("header Basic dTphLWxvbmctdG9rZW4= sent"),
+                         "header *** sent")
+
+    def test_mask_returns_the_value_unchanged(self):
+        # Callers wrap a value in it, so it has to pass the value through.
+        self.assertEqual(secrets.mask("abcdefgh12345678"), "abcdefgh12345678")
+
+    def test_mask_skips_a_value_too_short_to_hide(self):
+        secrets.mask("short")
+        self.assertEqual(secrets.SCRUB, [])
+        self.assertEqual(secrets.scrub("shortest"), "shortest")
+
+    def test_mask_registers_one_value_once(self):
+        secrets.mask("abcdefgh12345678")
+        secrets.mask("abcdefgh12345678")
+        self.assertEqual(secrets.SCRUB, ["abcdefgh12345678"])

@@ -35,7 +35,9 @@ def http_error(code, body=b"boom", headers=None):
 
 class TestHttp(unittest.TestCase):
     def setUp(self):
+        # basic() registers the header it builds, so clear on the way out too.
         secrets.SCRUB.clear()
+        self.addCleanup(secrets.SCRUB.clear)
 
     def test_json_decodes_the_body(self):
         client = http.Http(opener=opener_returning(FakeResponse(200, {"id": 7})))
@@ -148,6 +150,13 @@ class TestHttp(unittest.TestCase):
 
     def test_basic_builds_an_authorization_value(self):
         self.assertEqual(http.basic("", "pat"), "Basic OnBhdA==")
+
+    def test_the_header_it_builds_becomes_maskable(self):
+        # The scrubber holds what secrets.env holds. The header is a different
+        # string, so before this the encoded form of a live credential could not
+        # be masked on any path that scrubs.
+        header = http.basic("me@example.com", "a-long-real-token")
+        self.assertEqual(secrets.scrub(f"sent {header} upstream"), "sent *** upstream")
 
     def test_every_request_carries_the_deadline(self):
         # urlopen with no timeout waits for ever. tk runs as a subprocess under

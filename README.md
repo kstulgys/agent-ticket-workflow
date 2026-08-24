@@ -149,7 +149,10 @@ your projects is ever committed here.
 
 Tokens live in `~/.claude/ticket-workflow/secrets.env`, mode 0600. `tk` reads
 that file itself, so a token never reaches the terminal, a log, or an agent
-transcript. No verb prints a secret.
+transcript. Every message `tk` prints goes through a scrubber that masks both
+the value in that file and the encoded header built from it. The one exception
+is `tk git`, which passes git's own output through untouched, so do not run a
+command that prints configuration through it, such as `git config --list`.
 
 ## The method
 

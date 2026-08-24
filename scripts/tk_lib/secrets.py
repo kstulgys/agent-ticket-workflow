@@ -33,8 +33,7 @@ def load(path=None):
                 value = value[1:-1]
             values[key.strip()] = value
     for value in values.values():
-        if len(value) >= 8 and value not in SCRUB:
-            SCRUB.append(value)
+        mask(value)
     return values
 
 
@@ -53,3 +52,19 @@ def scrub(text):
     for value in sorted(SCRUB, key=len, reverse=True):
         text = text.replace(value, "***")
     return text
+
+
+def mask(value):
+    """Adds one more value the scrubber must hide. Returns it unchanged.
+
+    load registers what secrets.env holds. A credential travels in another
+    form: Basic and a base64 of the pair. That string is not in the file, so
+    the list cannot hold it unless the code that builds it says so.
+
+    A value under eight characters is skipped, because a short one would mask
+    ordinary words and a part mask reads as safe when it is not.
+    """
+    value = str(value)
+    if len(value) >= 8 and value not in SCRUB:
+        SCRUB.append(value)
+    return value

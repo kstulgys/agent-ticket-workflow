@@ -152,4 +152,7 @@ def _retry_after(headers):
 
 
 def basic(user, token):
-    return "Basic " + base64.b64encode(f"{user}:{token}".encode()).decode()
+    # The header is the form the credential travels in, and it is not the value
+    # secrets.env holds, so register it here or the scrubber cannot see it.
+    return secrets.mask(
+        "Basic " + base64.b64encode(f"{user}:{token}".encode()).decode())

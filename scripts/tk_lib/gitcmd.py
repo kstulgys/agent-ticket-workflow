@@ -44,9 +44,12 @@ def env_for(profile, values):
     # in a remote url is worse, because .git/config holds it after the command
     # ends. GIT_TERMINAL_PROMPT=0 turns a password prompt into an error, so a
     # wrong credential fails now instead of blocking the run.
+    # The config value is a third form of the credential, beside the file value
+    # and the header, so register it too or the scrubber cannot see it.
+    header = secrets.mask("AUTHORIZATION: " + http.basic(user, token))
     env.update({"GIT_CONFIG_COUNT": "1",
                 "GIT_CONFIG_KEY_0": key,
-                "GIT_CONFIG_VALUE_0": "AUTHORIZATION: " + http.basic(user, token),
+                "GIT_CONFIG_VALUE_0": header,
                 "GIT_TERMINAL_PROMPT": "0"})
     return env
 
