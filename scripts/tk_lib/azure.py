@@ -351,6 +351,9 @@ class Azure:
         sentences: nobody at all is a spelling to fix, and two people is a
         question for a human. One None for both left the caller unable to tell
         them apart.
+
+        No caller in tk today. It is the lookup a profile author needs for the
+        people block, which no verb offers yet.
         """
         # A quote inside a WIQL literal doubles. A name such as O'Brien breaks
         # the query without this.

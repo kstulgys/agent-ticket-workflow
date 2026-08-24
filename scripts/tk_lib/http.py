@@ -116,10 +116,6 @@ class Http:
         except ValueError:
             raise HttpError(status, payload.decode("utf-8", "replace")) from None
 
-    def text(self, method, url, body=None, headers=None):
-        _, payload, _ = self.raw(method, url, body, headers)
-        return payload.decode("utf-8", "replace")
-
 
 def _may_retry(method, status):
     if str(method).upper() == "POST":

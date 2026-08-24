@@ -49,6 +49,9 @@ def slugify(text, words=5):
     An accented letter loses the accent and keeps its word whole. A Dutch title
     is the normal case here, so a word like Financiele must not split in two and
     spend two of the word slots.
+
+    No caller in tk today. SKILL.md step 6 has the agent expand
+    host.branch_pattern by hand, and this is the function that would do it.
     """
     plain = unicodedata.normalize("NFKD", (text or "").lower())
     plain = "".join(ch for ch in plain if not unicodedata.combining(ch))
@@ -61,6 +64,9 @@ def expand(pattern, **values):
 
     One pass means a value that holds a brace hole is never rewritten by a later
     key, so the result does not depend on the argument order.
+
+    No caller in tk today. It is the other half of the branch name and commit
+    subject expansion that SKILL.md step 6 leaves to the agent.
     """
     def fill(match):
         key = match.group(1)
