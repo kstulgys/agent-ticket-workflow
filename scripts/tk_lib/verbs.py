@@ -5,7 +5,7 @@ The guard and the error shape live in cli, so resolve wears the same ones.
 import argparse
 import os
 
-from . import cli, config, doctor, figma, gitcmd, secrets
+from . import bootstrap, cli, config, doctor, figma, gitcmd, secrets
 
 # The arguments each pull request action cannot run without. A missing one used
 # to reach the server as the word None: a null description replaced text a
@@ -101,6 +101,38 @@ def _doctor(argv):
     report = doctor.check(profiles, adapters, hosts)
     cli.emit(report)
     return 0 if report["ok"] else 1
+
+
+@cli.verb("detect")
+@cli.guarded
+def _detect(argv):
+    """What the working directory knows. It reads no token and no profile."""
+    parser = argparse.ArgumentParser(prog="tk detect")
+    parser.add_argument("--path")
+    args = parser.parse_args(argv)
+    # A directory with no remote answers nulls and exits 0. That is a fact the
+    # caller acts on, not a failure.
+    cli.emit(bootstrap.detect(args.path))
+    return 0
+
+
+@cli.verb("init")
+@cli.guarded
+def _init(argv):
+    parser = argparse.ArgumentParser(prog="tk init")
+    parser.add_argument("--slug", required=True)
+    parser.add_argument("--tracker", required=True,
+                        choices=("azure", "jira", "github"))
+    parser.add_argument("--ticket")
+    parser.add_argument("--org")
+    parser.add_argument("--project")
+    parser.add_argument("--site")
+    parser.add_argument("--owner")
+    parser.add_argument("--repo")
+    parser.add_argument("--path")
+    args = parser.parse_args(argv)
+    cli.emit(bootstrap.init(args, secrets.load()))
+    return 0
 
 
 @cli.verb("mine")

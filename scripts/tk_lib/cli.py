@@ -8,6 +8,8 @@ USAGE = """usage: tk <verb> [options]
 
 verbs:
   doctor                     check every provider and project
+  detect                     what the working directory knows
+  init --slug S --tracker T  write a project profile
   resolve <arg>              id, key, url, or cwd to a project
   mine [--slug S]            tickets assigned to me
   show <ticket>              the normalised ticket shape

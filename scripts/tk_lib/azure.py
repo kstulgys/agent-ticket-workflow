@@ -161,6 +161,19 @@ class Azure:
             # caller through this string.
             return {"ok": False, "error": error.body}
 
+    def repo_ids(self, name):
+        """The two guids an Azure Repos host needs, from the repository name.
+
+        Every Azure git route is keyed by host.repo_id, not by the repository
+        name (see _git). A profile written from a remote holds the name, so one
+        call here turns it into the two guids doctor checks for.
+        """
+        url = (f"{self.org}/{self.project}/_apis/git/repositories/"
+               f"{urllib.parse.quote(name)}?api-version={self.GIT_VERSION}")
+        data = self._get(url)
+        return {"repo_id": data.get("id"),
+                "project_id": (data.get("project") or {}).get("id")}
+
     def mine(self):
         """Every assigned work item, hydrated in chunks the route accepts.
 
