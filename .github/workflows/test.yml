@@ -24,5 +24,8 @@ jobs:
       # to cache and nothing to resolve.
       - name: Compile every module
         run: python3 -m compileall -q scripts
+      # shellcheck ships on ubuntu-latest, so this needs no install either.
+      - name: Lint the wizard
+        run: shellcheck scripts/setup.sh
       - name: Run the suite
         run: python3 -m unittest discover -s tests -t tests

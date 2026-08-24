@@ -14,9 +14,9 @@ set -euo pipefail
 
 if [[ -t 1 ]] && command -v tput >/dev/null 2>&1 && [[ "$(tput colors 2>/dev/null || echo 0)" -ge 8 ]]; then
   BOLD=$(tput bold); DIM=$(tput dim); RESET=$(tput sgr0)
-  BLUE=$(tput setaf 4); GREEN=$(tput setaf 2); YELLOW=$(tput setaf 3); RED=$(tput setaf 1)
+  BLUE=$(tput setaf 4); GREEN=$(tput setaf 2); YELLOW=$(tput setaf 3)
 else
-  BOLD=""; DIM=""; RESET=""; BLUE=""; GREEN=""; YELLOW=""; RED=""
+  BOLD=""; DIM=""; RESET=""; BLUE=""; GREEN=""; YELLOW=""
 fi
 
 # Author sets this at the top of the stages section.
@@ -25,7 +25,6 @@ TOTAL_STAGES=0
 _STAGE_INDEX=0
 ENV_FILE="${ENV_FILE:-.env}"
 WRITTEN_ENV=()    # KEYs written to ENV_FILE this run
-WRITTEN_SECRET=() # secret NAMEs set this run
 SKIPPED=()        # things we couldn't do (e.g. gh missing)
 
 # _clear wipes the terminal so only the current step is on screen. No-op when
@@ -80,14 +79,6 @@ pause() {
   read -r _ || true
 }
 
-# confirm "question" is a y/N gate; returns success on yes.
-confirm() {
-  local reply=""
-  printf '  %s? %s [y/N] ' "$YELLOW" "$1"
-  read -r reply || true
-  [[ "$reply" =~ ^[Yy] ]]
-}
-
 # _existing KEY: current value of KEY in ENV_FILE, if any.
 _existing() {
   [[ -f "$ENV_FILE" ]] || return 1
@@ -131,6 +122,9 @@ write_env() {
   local key="$1" value="$2" tmp
   touch "$ENV_FILE"
   tmp=$(mktemp)
+  # The copy holds every token saved so far, so an interrupt between the
+  # redirect and the mv must not leave it on disk.
+  trap 'rm -f "$tmp"' RETURN
   grep -vE "^${key}=" "$ENV_FILE" > "$tmp" || true
   printf '%s=%s\n' "$key" "$value" >> "$tmp"
   mv "$tmp" "$ENV_FILE"
@@ -138,40 +132,11 @@ write_env() {
   printf '  %s✓ wrote%s %s → %s\n' "$GREEN" "$RESET" "$key" "$ENV_FILE"
 }
 
-# set_secret NAME VALUE sets a GitHub Actions repo secret via gh. Falls back
-# to a warning (and records it) if gh is unavailable or unauthenticated.
-set_secret() {
-  local name="$1" value="$2"
-  if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-    if printf '%s' "$value" | gh secret set "$name" >/dev/null 2>&1; then
-      WRITTEN_SECRET+=("$name")
-      printf '  %s✓ set%s GitHub secret %s\n' "$GREEN" "$RESET" "$name"
-      return
-    fi
-  fi
-  SKIPPED+=("GitHub secret $name (set it manually: gh secret set $name)")
-  warn "skipped GitHub secret $name: gh not ready; set it later"
-}
-
-# set_var NAME VALUE sets a GitHub Actions repo variable (non-secret).
-set_var() {
-  local name="$1" value="$2"
-  if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-    if gh variable set "$name" --body "$value" >/dev/null 2>&1; then
-      printf '  %s✓ set%s GitHub variable %s\n' "$GREEN" "$RESET" "$name"
-      return
-    fi
-  fi
-  SKIPPED+=("GitHub variable $name")
-  warn "skipped GitHub variable $name, gh not ready; set it later"
-}
-
-# finish clears, then shows a closing summary of everything configured.
+# finish shows a closing summary of everything configured. It does not clear the
+# screen, so the tk doctor output just above it stays on screen.
 finish() {
-  _clear
   printf '\n%s%s  ✓ Setup complete%s\n' "$BOLD" "$GREEN" "$RESET"
   (( ${#WRITTEN_ENV[@]} ))    && note "wrote ${#WRITTEN_ENV[@]} value(s) to $ENV_FILE: ${WRITTEN_ENV[*]}"
-  (( ${#WRITTEN_SECRET[@]} )) && note "set ${#WRITTEN_SECRET[@]} GitHub secret(s): ${WRITTEN_SECRET[*]}"
   if (( ${#SKIPPED[@]} )); then
     printf '\n'; warn "still to do by hand:"
     for s in "${SKIPPED[@]}"; do note "  - $s"; done
@@ -232,8 +197,7 @@ for provider in superpowers azure jira github figma; do
   want "$provider" && TOTAL_STAGES=$((TOTAL_STAGES + 1))
 done
 
-AZDO_ORG="${AZDO_ORG:-northwind}"
-JIRA_SITE="${JIRA_SITE:-globex.atlassian.net}"
+banner "Ticket workflow setup"
 
 # curl_cfg prints one line for curl --config -. The credential reaches curl on a
 # pipe, so it never sits in the command line that ps shows. The quoted form
@@ -277,42 +241,64 @@ fi
 if want azure; then
   stage "Azure DevOps personal access token"
   say "This token reads work items, writes comments and states, and pushes code."
-  step "On the page that opens, select New Token."
-  step "Scopes: Work Items (Read, write & manage), Code (Read & write), Build (Read)."
-  note "Editing the scopes later keeps the same value, so you do not re-paste it."
-  open_url "https://dev.azure.com/$AZDO_ORG/_usersSettings/tokens"
-  ask AZDO_USER "Your Azure account email:"
-  ask_secret AZDO_PAT "Paste the token:"
-  write_env AZDO_USER "$AZDO_USER"
-  write_env AZDO_PAT "$AZDO_PAT"
-  if curl_cfg user ":$AZDO_PAT" \
-      | curl -sf --config - \
-        "https://dev.azure.com/$AZDO_ORG/_apis/connectionData?api-version=7.1-preview" \
-      | grep -q authenticatedUser; then
-    say "Verified. The token reads connectionData."
+  # The org names the account the token belongs to, and it reaches the token
+  # page and the verify call below. No default can be right for anybody, so ask.
+  # The value stays out of secrets.env on purpose: tk adds every value in that
+  # file to its scrub list, and the org name belongs in ordinary output.
+  AZDO_ORG="${AZDO_ORG:-}"
+  [[ -n "$AZDO_ORG" ]] \
+    || ask AZDO_ORG "Your Azure DevOps organization, the name after dev.azure.com/:"
+  if [[ -z "$AZDO_ORG" ]]; then
+    warn "No organization, so this stage cannot open the token page."
+    SKIPPED+=("set up the Azure token: re-run scripts/setup.sh azure")
   else
-    say "The token did not verify. Check the scopes, then run this stage again."
+    step "On the page that opens, select New Token."
+    step "Scopes: Work Items (Read, write & manage), Code (Read & write), Build (Read)."
+    note "Editing the scopes later keeps the same value, so you do not re-paste it."
+    open_url "https://dev.azure.com/$AZDO_ORG/_usersSettings/tokens"
+    ask AZDO_USER "Your Azure account email:"
+    ask_secret AZDO_PAT "Paste the token:"
+    write_env AZDO_USER "$AZDO_USER"
+    write_env AZDO_PAT "$AZDO_PAT"
+    if curl_cfg user ":$AZDO_PAT" \
+        | curl -sf --config - \
+          "https://dev.azure.com/$AZDO_ORG/_apis/connectionData?api-version=7.1-preview" \
+        | grep -q authenticatedUser; then
+      say "Verified. The token reads connectionData."
+    else
+      say "The token did not verify. Check the scopes, then run this stage again."
+    fi
   fi
 fi
 
 if want jira; then
   stage "Jira API token"
   say "Jira Cloud uses Basic auth: your account email plus an API token."
-  step "On the page that opens, select Create API token."
-  step "Name it ticket-workflow. Copy the value now, because Jira shows it once."
-  open_url "https://id.atlassian.com/manage-profile/security/api-tokens"
-  ask JIRA_EMAIL "Your Atlassian account email:"
-  ask_secret JIRA_TOKEN "Paste the API token:"
-  write_env JIRA_EMAIL "$JIRA_EMAIL"
-  write_env JIRA_TOKEN "$JIRA_TOKEN"
-  if curl_cfg user "$JIRA_EMAIL:$JIRA_TOKEN" \
-      | curl -sf --config - "https://$JIRA_SITE/rest/api/3/myself" \
-      | grep -q accountId; then
-    say "Verified. The token reads your account."
+  # The site is the host the verify call below reads. The same rule as the
+  # Azure org: no default can be right, and the value stays out of secrets.env.
+  JIRA_SITE="${JIRA_SITE:-}"
+  [[ -n "$JIRA_SITE" ]] \
+    || ask JIRA_SITE "Your Atlassian site, for example acme.atlassian.net:"
+  if [[ -z "$JIRA_SITE" ]]; then
+    warn "No site, so this stage cannot verify a token."
+    SKIPPED+=("set up the Jira token: re-run scripts/setup.sh jira")
   else
-    say "The token did not verify."
-    say "If your organization blocks API tokens, read"
-    say "references/jira-cookie-fallback.md and use the browser session instead."
+    step "On the page that opens, select Create API token."
+    step "Name it ticket-workflow. Copy the value now, because Jira shows it once."
+    open_url "https://id.atlassian.com/manage-profile/security/api-tokens"
+    ask JIRA_EMAIL "Your Atlassian account email:"
+    ask_secret JIRA_TOKEN "Paste the API token:"
+    write_env JIRA_EMAIL "$JIRA_EMAIL"
+    write_env JIRA_TOKEN "$JIRA_TOKEN"
+    if curl_cfg user "$JIRA_EMAIL:$JIRA_TOKEN" \
+        | curl -sf --config - "https://$JIRA_SITE/rest/api/3/myself" \
+        | grep -q accountId; then
+      say "Verified. The token reads your account."
+    else
+      say "The token did not verify."
+      say "If your organization blocks API tokens, read"
+      say "references/jira-cookie-fallback.md and use the browser session instead."
+    fi
   fi
 fi
 
@@ -363,6 +349,7 @@ TK="$(dirname "$0")/tk"
 if [[ ! -x "$TK" ]]; then
   warn "No tk beside this script at $TK."
   say "Your tokens are saved. Run tk doctor once tk is in place."
+  finish
   exit 1
 fi
 
@@ -370,5 +357,7 @@ status=0
 "$TK" doctor || status=$?
 if (( status != 0 )); then
   say "tk doctor found gaps. The output above names each fix."
+  finish
   exit "$status"
 fi
+finish
