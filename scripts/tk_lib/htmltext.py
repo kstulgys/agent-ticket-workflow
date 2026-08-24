@@ -3,6 +3,11 @@ import html as html_module
 import re
 
 _DROP = re.compile(r"<(script|style)\b[^>]*>.*?</\1>", re.S | re.I)
+# A link keeps its target in the href, and the tag strip below deletes it. A
+# ticket that links a design as a smart card then holds no url in its text, and
+# shape.figma_urls, which reads this text, finds nothing. So write the target
+# beside the words first.
+_ANCHOR = re.compile(r"(?is)<a\b[^>]*\bhref=([\"'])(.*?)\1[^>]*>(.*?)</a>")
 _SPAN = re.compile(r"<t[dh]\b[^>]*>.*?</t[dh]>", re.S | re.I)
 _INNER = re.compile(r"(?i)</?(p|div|br|h[1-6])\b[^>]*>")
 _CELL = re.compile(r"(?i)</t[dh]>")
@@ -13,10 +18,24 @@ _BLOCK = re.compile(r"(?i)</(p|div|ul|ol|h[1-6]|tr|table)>")
 _TAG = re.compile(r"<[^>]+>")
 
 
+def _anchor(match):
+    """The words, then the target in brackets.
+
+    A target already inside the words stays once. Azure auto-links a pasted
+    url, so there the words are the url itself. A second copy would read as two
+    links to a person, and as one repeat to the scanner.
+    """
+    href, inner = match.group(2).strip(), match.group(3)
+    if not href or href in inner:
+        return inner
+    return f"{inner} ({href})"
+
+
 def html_to_text(html):
     if not html:
         return ""
     text = _DROP.sub("", html)
+    text = _ANCHOR.sub(_anchor, text)
     # The Azure Boards editor wraps the text of a cell in <div> or <p>. A block
     # end becomes a newline later, which splits the cell from its pair. So
     # flatten a block boundary inside a cell to a space first. List tags stay

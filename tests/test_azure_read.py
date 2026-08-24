@@ -139,6 +139,19 @@ class TestAzureShow(unittest.TestCase):
                           "https://www.figma.com/design/Z/y?node-id=9-9"])
         fake.assert_drained()
 
+    def test_a_design_link_behind_words_reaches_figma_urls(self):
+        # The scan runs on converted text, so a test that hands raw html to
+        # shape.figma_urls proves nothing about this path. The editor renders a
+        # pasted link as a card, so the words are a page title, not the url.
+        url = "https://www.figma.com/design/ABC123/Checkout?node-id=1204-8891"
+        item = dict(AZ_WORKITEM)
+        item["fields"] = {**AZ_WORKITEM["fields"],
+                          "System.Description":
+                              f'<p>Design: <a href="{url}">Checkout mobile</a></p>'}
+        api, fake = client(FakeResponse(200, item), FakeResponse(200, AZ_COMMENTS))
+        self.assertEqual(api.show("59644")["figma_urls"], [url])
+        fake.assert_drained()
+
     def test_parent_and_children_come_from_relations(self):
         api, fake = reader()
         got = api.show("59644")

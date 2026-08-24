@@ -228,6 +228,18 @@ class TestJiraShow(unittest.TestCase):
                           "https://www.figma.com/design/Z/y?node-id=9-9"])
         fake.assert_drained()
 
+    def test_a_design_link_behind_words_in_a_comment_reaches_figma_urls(self):
+        # The scan runs on converted text, so a test that hands raw html to
+        # shape.figma_urls proves nothing about this path. Jira renders a
+        # pasted link as a smart card, so the words are a page title.
+        url = "https://www.figma.com/design/ABC123/Checkout?node-id=1204-8891"
+        late = {"comments": [{"author": {"displayName": "Ann"},
+                              "renderedBody":
+                                  f'<p>Design: <a href="{url}">Checkout mobile</a></p>'}]}
+        api, fake = client(FakeResponse(200, ISSUE), FakeResponse(200, late))
+        self.assertEqual(api.show("DIST-1235")["figma_urls"], [url])
+        fake.assert_drained()
+
 
 class TestJiraMine(unittest.TestCase):
     def test_mine_posts_jql_for_the_current_user(self):

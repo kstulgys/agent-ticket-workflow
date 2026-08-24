@@ -48,3 +48,28 @@ class TestHtmlToText(unittest.TestCase):
 
     def test_a_nested_list_keeps_one_item_per_line(self):
         self.assertEqual(html_to_text("<ul><li>a<ul><li>b</li></ul></li></ul>"), "- a\n- b")
+
+    # The tag strip used to delete the href, so a ticket that linked a design
+    # as a smart card held no url in its text at all. shape.figma_urls reads
+    # this text, so the link was lost before the scan ran.
+    def test_a_link_keeps_its_target_beside_the_words(self):
+        url = "https://www.figma.com/design/ABC123/Checkout?node-id=1204-8891"
+        html = f'<p>Design: <a href="{url}">Checkout mobile</a></p>'
+        self.assertEqual(html_to_text(html), f"Design: Checkout mobile ({url})")
+
+    def test_a_link_whose_words_are_the_url_keeps_one_copy(self):
+        url = "https://example.com/a"
+        self.assertEqual(html_to_text(f'<p><a href="{url}">{url}</a></p>'), url)
+
+    def test_a_link_inside_a_cell_keeps_the_row_shape(self):
+        html = ('<table><tr><td><a href="https://e.com/a">spec</a></td>'
+                "<td>ok</td></tr></table>")
+        self.assertEqual(html_to_text(html), "spec (https://e.com/a) | ok")
+
+    # Azure quotes an attribute with ", Jira sends ' for the same markup.
+    def test_a_single_quoted_target_is_kept_too(self):
+        html = "<p><a href='https://e.com/a'>spec</a></p>"
+        self.assertEqual(html_to_text(html), "spec (https://e.com/a)")
+
+    def test_a_link_with_no_target_adds_no_brackets(self):
+        self.assertEqual(html_to_text('<p><a name="top">words</a></p>'), "words")
