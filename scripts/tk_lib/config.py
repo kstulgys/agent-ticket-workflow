@@ -56,6 +56,21 @@ def load_all(root=None):
                 # The default message gives no file name, and a person with
                 # several profiles cannot tell which file to repair.
                 raise BadProfile(f"{path} is not valid JSON: {error}") from error
+        if not isinstance(profile, dict):
+            # Valid JSON is not a valid profile. A list or a string clears the
+            # guard above and then crashes on the assignment below, and a
+            # traceback is the one answer this CLI promises never to give.
+            raise BadProfile(
+                f"{path} holds {type(profile).__name__}, not an object. "
+                "A profile is a JSON object. See references/profiles.md.")
+        for block in ("match", "tracker", "host", "buckets", "people",
+                      "link_rules", "deploy_gate", "preview"):
+            if block in profile and not isinstance(profile[block], dict):
+                # doctor reads tracker.kind outside its own guard, so a string
+                # here takes down the whole report rather than one row.
+                raise BadProfile(
+                    f"{path} has {block} as {type(profile[block]).__name__}, "
+                    "not an object. See references/profiles.md.")
         profile["_dir"] = directory
         profiles[slug] = profile
     return profiles

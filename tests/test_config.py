@@ -162,6 +162,41 @@ class TestBrokenProfile(unittest.TestCase):
         self.assertEqual(sorted(profiles), ["globex"])
         self.assertEqual(err.getvalue(), "")
 
+    def _overwrite(self, root, slug, text):
+        """Writes raw text as one profile's config.json. A dict cannot do this."""
+        path = os.path.join(root, "projects", slug, "config.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        return path
+
+    def test_valid_json_that_is_not_an_object_names_the_file(self):
+        # json.load succeeds, the guard above passes, and the next line used to
+        # raise TypeError, which the error table does not hold. One hand edited
+        # file then took down every verb with a traceback and no JSON.
+        for text in ("[]", '"azure"', "42"):
+            with self.subTest(text=text):
+                root = root_with(NORTHWIND)
+                path = self._overwrite(root, "northwind", text)
+                with self.assertRaises(config.BadProfile) as cm:
+                    config.load_all(root)
+                self.assertIn(path, str(cm.exception))
+
+    def test_a_block_that_is_not_an_object_names_the_block(self):
+        # doctor reads tracker.kind outside its own row guard, so a string here
+        # took down the whole report with AttributeError instead of one row.
+        root = root_with(NORTHWIND)
+        self._overwrite(root, "northwind",
+                        json.dumps({"slug": "northwind", "tracker": "azure"}))
+        with self.assertRaises(config.BadProfile) as cm:
+            config.load_all(root)
+        self.assertIn("tracker", str(cm.exception))
+
+    def test_a_well_formed_profile_still_loads_and_carries_its_directory(self):
+        root = root_with(NORTHWIND)
+        loaded = config.load_all(root)["northwind"]
+        self.assertEqual(loaded["_dir"],
+                         os.path.join(root, "projects", "northwind"))
+
 
 class TestResolveVerb(unittest.TestCase):
     """The verb owns the exit codes, so the codes need their own tests."""
@@ -192,3 +227,16 @@ class TestResolveVerb(unittest.TestCase):
         code, payload = self._run(["resolve", "DIST-7"], root_with(GLOBEX))
         self.assertEqual(code, 0)
         self.assertEqual((payload["slug"], payload["ticket"]), ("globex", "DIST-7"))
+
+    def test_a_malformed_profile_prints_the_profile_code_not_a_traceback(self):
+        # The routine switches on the code, and README and SKILL.md both promise
+        # one. A profile that is valid JSON but not an object used to print a
+        # traceback on stderr and nothing at all on stdout.
+        root = root_with(NORTHWIND)
+        with open(os.path.join(root, "projects", "northwind", "config.json"),
+                  "w", encoding="utf-8") as fh:
+            fh.write("[]")
+        code, payload = self._run(["resolve", "59644"], root)
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["error"], "profile")
+        self.assertIn("config.json", payload["message"])
