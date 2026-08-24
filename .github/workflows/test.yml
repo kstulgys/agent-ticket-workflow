@@ -1,0 +1,28 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  unittest:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.11 is the floor README.md states, and the floor the tests need:
+        # they call unittest's enterContext, added in 3.11. 3.14 is the release
+        # the maintainer runs. Two ends of the range catch a change that only
+        # one of them would.
+        python-version: ["3.11", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      # No install step. This project has no dependencies, so there is nothing
+      # to cache and nothing to resolve.
+      - name: Compile every module
+        run: python3 -m compileall -q scripts
+      - name: Run the suite
+        run: python3 -m unittest discover -s tests -t tests
