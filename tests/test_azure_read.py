@@ -280,6 +280,32 @@ class TestAzureMine(unittest.TestCase):
         self.assertEqual(len(fake.calls), 1)
         fake.assert_drained()
 
+    def test_a_long_board_hydrates_in_chunks_the_route_accepts(self):
+        # The batch route takes 200 ids at most, so one request for a long list
+        # was a refused call, not a short answer.
+        total = azure.BATCH_IDS + 50
+        wiql = {"workItems": [{"id": n} for n in range(1, total + 1)]}
+        api, fake = client(FakeResponse(200, wiql),
+                           FakeResponse(200, {"value": []}),
+                           FakeResponse(200, {"value": []}))
+        api.mine()
+        self.assertEqual(len(fake.calls), 3)
+        first = fake.calls[1]["url"].split("ids=")[1].split("&")[0].split(",")
+        second = fake.calls[2]["url"].split("ids=")[1].split("&")[0].split(",")
+        self.assertEqual(len(first), azure.BATCH_IDS)
+        self.assertEqual(len(second), 50)
+        self.assertEqual(second[0], str(azure.BATCH_IDS + 1))
+        fake.assert_drained()
+
+    def test_a_board_exactly_at_the_limit_makes_one_hydrate_call(self):
+        # Pins the boundary. An off by one here sends a request the route
+        # refuses, or splits a list that did not need splitting.
+        wiql = {"workItems": [{"id": n} for n in range(1, azure.BATCH_IDS + 1)]}
+        api, fake = client(FakeResponse(200, wiql), FakeResponse(200, {"value": []}))
+        api.mine()
+        self.assertEqual(len(fake.calls), 2)
+        fake.assert_drained()
+
 
 class TestAzureWhoami(unittest.TestCase):
     def test_whoami_reads_connection_data(self):

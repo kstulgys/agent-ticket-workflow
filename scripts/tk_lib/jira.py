@@ -12,6 +12,14 @@ SHOW_FIELDS = ("summary,status,issuetype,priority,assignee,parent,labels,"
 # One comment page. A named size keeps the page loop honest: the server default
 # is large enough to hide a second page until a ticket grows past it.
 COMMENT_PAGE = 100
+# The search route serves at most 100 issues per page. A default sized read is
+# 50, and the ones it drops are the least recently updated, which is where
+# stale work lives.
+MINE_PAGE = 100
+# A stop for a token chain that never ends. Atlassian has shipped a chain where
+# isLast never turns true, so the bound and the repeated token check below are
+# both load bearing.
+MINE_MAX_PAGES = 50
 
 
 def _paragraph(block):
@@ -102,22 +110,51 @@ class Jira:
             return {"ok": False, "error": error.body}
 
     def mine(self):
+        """Every assigned issue, not the first page.
+
+        This route pages by token, not by offset. It names nextPageToken and
+        isLast, it carries no total, and startAt is gone, so the comment walk's
+        offset rule cannot serve here.
+
+        Four stop rules. A page with no issues stops, so an empty answer cannot
+        loop. isLast stops, because that is the provider saying it is done. No
+        token stops, for the same reason. A token equal to the one just used
+        stops, because Atlassian has shipped a chain that repeats a token and
+        never sets isLast, and that would spin the CLI for ever. The bound then
+        catches anything those four miss, and it raises rather than answering
+        short: a partial list the caller cannot tell from a whole one is worse
+        than an error.
+        """
         jql = (f"project = {self.project} AND assignee = currentUser() "
                "AND statusCategory != Done ORDER BY updated DESC")
-        found = self.http.json("POST", self._url("search/jql"),
-                               {"jql": jql, "maxResults": 100,
-                                "fields": ["summary", "status", "issuetype"]},
-                               self._headers())
-        out = []
-        for issue in found.get("issues", []):
-            fields = issue.get("fields") or {}
-            out.append(shape.summary(shape.ticket(
-                slug=self.slug, tracker=KIND, id=issue["key"], key=issue["key"],
-                url=f"{self.site}/browse/{issue['key']}",
-                type=(fields.get("issuetype") or {}).get("name"),
-                state=(fields.get("status") or {}).get("name"),
-                title=fields.get("summary"))))
-        return out
+        issues, token = [], None
+        for _ in range(MINE_MAX_PAGES):
+            body = {"jql": jql, "maxResults": MINE_PAGE,
+                    "fields": ["summary", "status", "issuetype"]}
+            if token:
+                body["nextPageToken"] = token
+            found = self.http.json("POST", self._url("search/jql"), body,
+                                   self._headers())
+            page = found.get("issues") or []
+            issues.extend(page)
+            following = found.get("nextPageToken")
+            if not page or found.get("isLast") or not following or following == token:
+                return [self._summary(issue) for issue in issues]
+            token = following
+        raise RuntimeError(
+            f"the assigned issue search answered {MINE_MAX_PAGES} pages without "
+            "reporting the last one. This read is not complete, so no answer "
+            "from it is whole.")
+
+    def _summary(self, issue):
+        """One row of the assigned list, in the shape every tracker answers."""
+        fields = issue.get("fields") or {}
+        return shape.summary(shape.ticket(
+            slug=self.slug, tracker=KIND, id=issue["key"], key=issue["key"],
+            url=f"{self.site}/browse/{issue['key']}",
+            type=(fields.get("issuetype") or {}).get("name"),
+            state=(fields.get("status") or {}).get("name"),
+            title=fields.get("summary")))
 
     def _comments(self, ticket):
         """Every comment, not the first page.

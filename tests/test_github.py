@@ -116,6 +116,46 @@ class TestGitHubReads(unittest.TestCase):
         self.assertIn("repo%3Aglobex-dist%2FWeb", fake.calls[0]["url"])
         fake.assert_drained()
 
+    def test_mine_reads_every_page_of_the_assigned_list(self):
+        # A one page read reported a short list as the whole answer, and mine is
+        # the entry point for the batch mode of the routine.
+        def issue(n):
+            return {"number": n, "title": f"t{n}", "state": "open",
+                    "html_url": "u", "labels": []}
+
+        first = {"items": [issue(n) for n in range(github.PAGE_SIZE)]}
+        second = {"items": [issue(999)]}
+        api, fake = client(FakeResponse(200, first), FakeResponse(200, second))
+        got = api.mine()
+        self.assertEqual(len(got), github.PAGE_SIZE + 1)
+        self.assertEqual(got[-1]["id"], "999")
+        self.assertIn("page=1", fake.calls[0]["url"])
+        self.assertIn("page=2", fake.calls[1]["url"])
+        fake.assert_drained()
+
+    def test_mine_makes_one_request_for_a_short_page(self):
+        payload = {"items": [{"number": 12, "title": "one", "state": "open",
+                              "html_url": "u", "labels": []}]}
+        api, fake = client(FakeResponse(200, payload))
+        api.mine()
+        self.assertEqual(len(fake.calls), 1)
+        fake.assert_drained()
+
+    def test_mine_at_the_search_ceiling_refuses_to_answer(self):
+        # The search route serves 1000 results at most. A read that fills the
+        # last page is at that ceiling, and a caller cannot tell such an answer
+        # from a whole one.
+        full = {"items": [{"number": n, "title": "t", "state": "open",
+                           "html_url": "u", "labels": []}
+                          for n in range(github.PAGE_SIZE)]}
+        api, fake = client(*[FakeResponse(200, full)
+                             for _ in range(github.SEARCH_MAX_PAGES)])
+        with self.assertRaises(RuntimeError) as cm:
+            api.mine()
+        self.assertIn("not complete", str(cm.exception))
+        self.assertEqual(len(fake.calls), github.SEARCH_MAX_PAGES)
+        fake.assert_drained()
+
     def test_repo_check_reports_the_sso_failure_instead_of_raising(self):
         api, fake = client(raiser(403, "SAML SSO enforcement"))
         got = api.repo_check()

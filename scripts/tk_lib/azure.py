@@ -13,6 +13,9 @@ VERSION_PREFIX = "7.1-preview"
 MINE_QUERY = ("SELECT [System.Id] FROM WorkItems WHERE [System.AssignedTo]=@Me "
               "AND [System.State] NOT IN ('Done','Removed','Closed') "
               "ORDER BY [System.ChangedDate] DESC")
+# The work items batch route takes at most 200 ids. A longer list is a refused
+# request, not a truncated answer, so mine sends the ids in chunks of this size.
+BATCH_IDS = 200
 
 
 class Azure:
@@ -159,12 +162,23 @@ class Azure:
             return {"ok": False, "error": error.body}
 
     def mine(self):
+        """Every assigned work item, hydrated in chunks the route accepts.
+
+        The batch route takes at most BATCH_IDS ids. A longer list is not a
+        short answer, it is a refused request, so a large board failed the call
+        outright rather than reading partially.
+        """
         ids = self._wiql(MINE_QUERY)
         if not ids:
             return []
         fields = "System.Id,System.WorkItemType,System.State,System.Title"
-        batch = self._get(self._api("_apis/wit/workitems", ids=",".join(ids), fields=fields))
-        return [shape.summary(self._skeleton(item)) for item in batch.get("value", [])]
+        items = []
+        for start in range(0, len(ids), BATCH_IDS):
+            batch = self._get(self._api("_apis/wit/workitems",
+                                        ids=",".join(ids[start:start + BATCH_IDS]),
+                                        fields=fields))
+            items.extend(batch.get("value") or [])
+        return [shape.summary(self._skeleton(item)) for item in items]
 
     def show(self, ticket, attachments_dir=None):
         # $expand=all brings the relations. Without it the parent, the children,

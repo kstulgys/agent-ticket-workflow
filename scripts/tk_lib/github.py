@@ -23,6 +23,10 @@ PAGE_SIZE = 100
 # A stop for a server that keeps answering full pages. Five thousand comments
 # on one pull request is not a case, and an unbounded loop hangs the CLI.
 MAX_PAGES = 50
+# The search route serves at most 100 items per page and at most 1000 results in
+# total, which is ten pages. A read that fills the tenth page is at the
+# provider's ceiling, not at the end of the list.
+SEARCH_MAX_PAGES = 10
 # GitHub links an issue through a phrase in the pull request body. Refs links
 # and closes nothing. A closing keyword such as Fixes completes the issue on
 # merge, and an issue that closes on merge skips its test pass.
@@ -117,11 +121,34 @@ class GitHub:
             return {"ok": False, "error": error.body}
 
     def mine(self):
+        """Every assigned issue, not the first page.
+
+        The search route pages like every other list route here, and a one page
+        read answers short with no error. mine is the entry point for the batch
+        mode of the routine, so a short answer plans against a partial backlog
+        and reports a clean sweep.
+
+        A walk that fills the last page raises, for the reason _pages gives:
+        answering with the pages it did read puts the silent short answer one
+        level out, and the caller cannot tell a complete read from a truncated
+        one.
+        """
         query = urllib.parse.quote(
             f"repo:{self.owner}/{self.repo} is:issue is:open assignee:@me", safe="")
-        found = self.http.json("GET", f"{API}/search/issues?q={query}&per_page=100",
-                               headers=self._headers())
-        return [shape.summary(self._skeleton(item)) for item in found.get("items", [])]
+        out = []
+        for page in range(1, SEARCH_MAX_PAGES + 1):
+            found = self.http.json(
+                "GET",
+                f"{API}/search/issues?q={query}&per_page={PAGE_SIZE}&page={page}",
+                headers=self._headers())
+            items = list(found.get("items") or [])
+            out.extend(items)
+            if len(items) < PAGE_SIZE:
+                return [shape.summary(self._skeleton(item)) for item in out]
+        raise RuntimeError(
+            f"the assigned issue search answered {SEARCH_MAX_PAGES} full pages "
+            f"of {PAGE_SIZE} items, which is the search ceiling. This read is "
+            "not complete, so no answer from it is whole.")
 
     def show(self, ticket, attachments_dir=None):
         """The normalised shape for one issue.

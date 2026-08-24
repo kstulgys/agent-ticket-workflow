@@ -261,6 +261,42 @@ class TestJiraMine(unittest.TestCase):
         self.assertEqual(api.mine(), [])
         fake.assert_drained()
 
+    def test_mine_follows_the_page_token_to_the_last_page(self):
+        # A one page read reported a short list as the whole answer. The ones it
+        # dropped are the least recently updated, which is where stale work is.
+        def issue(key):
+            return {"key": key, "fields": {"summary": key,
+                                           "status": {"name": "To Do"},
+                                           "issuetype": {"name": "Bug"}}}
+
+        first = {"issues": [issue("DIST-1")], "nextPageToken": "tok1"}
+        second = {"issues": [issue("DIST-2")], "isLast": True}
+        api, fake = client(FakeResponse(200, first), FakeResponse(200, second))
+        got = api.mine()
+        self.assertEqual([row["key"] for row in got], ["DIST-1", "DIST-2"])
+        # The first request carries no token, the second carries the one it got.
+        self.assertNotIn("nextPageToken", fake.calls[0]["body"])
+        self.assertEqual(fake.calls[1]["body"]["nextPageToken"], "tok1")
+        fake.assert_drained()
+
+    def test_a_repeated_page_token_stops_the_walk(self):
+        # Atlassian has shipped a chain that repeats a token and never sets
+        # isLast. Without this stop the CLI spins for ever.
+        page = {"issues": [{"key": "DIST-1", "fields": {}}],
+                "nextPageToken": "tok1"}
+        api, fake = client(FakeResponse(200, page), FakeResponse(200, page))
+        got = api.mine()
+        self.assertEqual(len(got), 2)
+        self.assertEqual(len(fake.calls), 2)
+        fake.assert_drained()
+
+    def test_a_page_with_no_issues_stops_the_walk(self):
+        page = {"issues": [], "nextPageToken": "tok1"}
+        api, fake = client(FakeResponse(200, page))
+        self.assertEqual(api.mine(), [])
+        self.assertEqual(len(fake.calls), 1)
+        fake.assert_drained()
+
 
 class TestJiraWhoami(unittest.TestCase):
     def test_whoami_reads_myself(self):
