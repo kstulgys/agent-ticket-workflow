@@ -2,6 +2,7 @@
 import json
 import sys
 import urllib.error
+from http.client import HTTPException
 
 USAGE = """usage: tk <verb> [options]
 
@@ -47,8 +48,8 @@ def error_codes():
     """Every failure class this CLI answers for, each with its code.
 
     The import is local, because config imports cli for the verb table. The
-    order matters, because URLError is an OSError, and BadProfile and
-    UnicodeDecodeError are both ValueError.
+    order matters, because URLError, TimeoutError, and ConnectionError are all
+    an OSError, and BadProfile and UnicodeDecodeError are both a ValueError.
 
     guarded derives its except tuple from this table, so the classes it
     catches and the codes it prints cannot drift apart.
@@ -63,6 +64,13 @@ def error_codes():
             (KeyError, "profile"),
             (UnicodeDecodeError, "encoding"),
             (urllib.error.URLError, "network"),
+            # IncompleteRead is an HTTPException and nothing else, so it used
+            # to escape every entry here and print a traceback with no JSON.
+            # RemoteDisconnected and TimeoutError are both an OSError, so they
+            # used to report filesystem for a network fault.
+            (HTTPException, "network"),
+            (TimeoutError, "network"),
+            (ConnectionError, "network"),
             (OSError, "filesystem"),
             (RuntimeError, "incomplete"),
             (ValueError, "usage"))
@@ -80,8 +88,9 @@ def guarded(fn):
     code.
 
     Each entry in error_codes comes from a real failure: a bad --render
-    directory, a reset connection, a profile that misses a key, a corrupt
-    secrets file, and the GitHub page walk at its bound.
+    directory, a profile that misses a key, a corrupt secrets file, and the
+    GitHub page walk at its bound. A reset connection, a truncated body, and a
+    request that passes its deadline all report network.
 
     Exit 2 is for an ambiguous ticket only. It is the one failure a human
     answers. argparse ends the process with 2 for a bad argument, so that code

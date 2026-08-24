@@ -6,6 +6,7 @@ import tempfile
 import unittest
 import urllib.error
 from unittest import mock
+from http.client import IncompleteRead, RemoteDisconnected
 
 import helpers  # noqa: F401
 
@@ -297,10 +298,10 @@ class TestGuarded(unittest.TestCase):
         self.assertIn("config.json", payload["message"])
 
     def test_every_error_class_below_becomes_exit_one_and_one_json_line(self):
-        # Each one comes from a real failure: a bad --render directory, a reset
-        # connection, a profile that misses a key, a corrupt secrets file, and
-        # the GitHub page walk at its bound. The code names the class, and the
-        # sentence sits under message, the shape resolve already answers.
+        # Each one comes from a real failure: a bad --render directory, a
+        # profile that misses a key, a corrupt secrets file, and the GitHub page
+        # walk at its bound. The code names the class, and the sentence sits
+        # under message, the shape resolve already answers.
         errors = [(OSError("no such directory: /tmp/gone"), "filesystem"),
                   (urllib.error.URLError("name or service not known"), "network"),
                   (KeyError("repo_id"), "profile"),
@@ -311,7 +312,15 @@ class TestGuarded(unittest.TestCase):
                   (ValueError("pass --bucket <name> or --gate"), "usage"),
                   (config.Unresolved("no profile matches the ticket 1"), "unresolved"),
                   (secrets.SecretsError("no secrets file"), "secrets"),
-                  (http.HttpError(401, "unauthorized"), "http")]
+                  (http.HttpError(401, "unauthorized"), "http"),
+                  # A truncated body used to match no entry at all, so the run
+                  # printed a traceback and no JSON. A reset and a timeout are
+                  # both an OSError, so both used to print filesystem for a
+                  # fault on the wire.
+                  (IncompleteRead(b""), "network"),
+                  (RemoteDisconnected("Remote end closed connection without"
+                                      " response"), "network"),
+                  (TimeoutError("timed out"), "network")]
         for error, code_name in errors:
             with self.subTest(error=type(error).__name__):
                 code, payload = self.run_raising(error)

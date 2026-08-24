@@ -11,7 +11,7 @@ from tk_lib import http, secrets
 def opener_returning(*items):
     queue = list(items)
 
-    def opener(request):
+    def opener(request, timeout=None):
         item = queue.pop(0)
         if isinstance(item, Exception):
             raise item
@@ -47,7 +47,7 @@ class TestHttp(unittest.TestCase):
     def test_a_dict_body_is_sent_as_json(self):
         seen = []
 
-        def opener(request):
+        def opener(request, timeout=None):
             seen.append(request)
             return FakeResponse(200, {})
 
@@ -58,7 +58,7 @@ class TestHttp(unittest.TestCase):
     def test_a_bytes_body_passes_through_untouched(self):
         seen = []
 
-        def opener(request):
+        def opener(request, timeout=None):
             seen.append(request)
             return FakeResponse(200, {})
 
@@ -70,7 +70,7 @@ class TestHttp(unittest.TestCase):
     def test_a_lowercase_content_type_keeps_the_caller_value(self):
         seen = []
 
-        def opener(request):
+        def opener(request, timeout=None):
             seen.append(request)
             return FakeResponse(200, {})
 
@@ -147,3 +147,38 @@ class TestHttp(unittest.TestCase):
 
     def test_basic_builds_an_authorization_value(self):
         self.assertEqual(http.basic("", "pat"), "Basic OnBhdA==")
+
+    def test_every_request_carries_the_deadline(self):
+        # urlopen with no timeout waits for ever. tk runs as a subprocess under
+        # an agent, so a provider that accepts the connection and then sends
+        # nothing would hang the run with nothing on stdout.
+        seen = []
+
+        def opener(request, timeout=None):
+            seen.append(timeout)
+            return FakeResponse(200, {})
+
+        http.Http(opener=opener).json("GET", "http://x")
+        self.assertEqual(seen, [http.TIMEOUT])
+
+    def test_a_long_retry_after_is_clamped(self):
+        # A provider can ask for minutes. retries defaults to 2, so an unclamped
+        # value sleeps it twice and the run looks dead.
+        slept = []
+        client = http.Http(
+            opener=opener_returning(http_error(429, headers={"Retry-After": "600"}),
+                                    FakeResponse(200, {})),
+            sleep=slept.append)
+        client.json("GET", "http://x")
+        self.assertEqual(slept, [float(http.MAX_RETRY_AFTER)])
+
+    def test_a_2xx_that_is_not_json_reports_the_status(self):
+        # An Azure PAT that lost its scope answers 203 with a sign-in page.
+        # json.loads then raised ValueError, which the error table reads as a
+        # usage mistake, so a dead token reported a wrong command line.
+        client = http.Http(opener=opener_returning(
+            FakeResponse(203, b"<html>sign in</html>")))
+        with self.assertRaises(http.HttpError) as cm:
+            client.json("GET", "http://x")
+        self.assertEqual(cm.exception.status, 203)
+        self.assertIn("sign in", cm.exception.body)

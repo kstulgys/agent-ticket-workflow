@@ -15,6 +15,16 @@ RETRY_STATUS = (429, 500, 502, 503, 504)
 # the request before it did any work. Keep this list at one status. Do not merge
 # it back into RETRY_STATUS.
 POST_RETRY_STATUS = (429,)
+# Every request carries a deadline. urlopen with no timeout waits for ever, and
+# tk runs as a subprocess under an agent, so a provider that accepts the
+# connection and then sends nothing would hang the whole run with no output.
+# Thirty seconds is longer than any call this tool makes, an attachment upload
+# included.
+TIMEOUT = 30
+# A provider can ask for a wait of minutes. retries defaults to 2, so an
+# unclamped value sleeps it twice with nothing on stdout. A capped wait can hit
+# 429 again and fail, and a clear failure beats a silent stall.
+MAX_RETRY_AFTER = 30
 
 
 class HttpError(Exception):
@@ -25,10 +35,11 @@ class HttpError(Exception):
 
 
 class Http:
-    def __init__(self, opener=None, sleep=None, retries=2):
+    def __init__(self, opener=None, sleep=None, retries=2, timeout=TIMEOUT):
         self._opener = opener or urllib.request.urlopen
         self._sleep = sleep or time.sleep
         self._retries = retries
+        self._timeout = timeout
 
     def raw(self, method, url, body=None, headers=None):
         headers = dict(headers or {})
@@ -46,7 +57,7 @@ class Http:
             for key, value in headers.items():
                 request.add_header(key, value)
             try:
-                with self._opener(request) as response:
+                with self._opener(request, timeout=self._timeout) as response:
                     return response.status, response.read(), dict(response.headers)
             except urllib.error.HTTPError as error:
                 payload = error.read() or b""
@@ -56,8 +67,20 @@ class Http:
                 raise HttpError(error.code, payload.decode("utf-8", "replace")) from None
 
     def json(self, method, url, body=None, headers=None):
-        _, payload, _ = self.raw(method, url, body, headers)
-        return json.loads(payload) if payload.strip() else {}
+        """The decoded body, or an HttpError naming the status.
+
+        A 2xx is not proof of a JSON body. An Azure PAT that lost its scope
+        answers 203 with a sign-in page, and json.loads then raises ValueError,
+        which the error table reads as a usage mistake. So a body that does not
+        decode is reported as what it is: an answer from the server.
+        """
+        status, payload, _ = self.raw(method, url, body, headers)
+        if not payload.strip():
+            return {}
+        try:
+            return json.loads(payload)
+        except ValueError:
+            raise HttpError(status, payload.decode("utf-8", "replace")) from None
 
     def text(self, method, url, body=None, headers=None):
         _, payload, _ = self.raw(method, url, body, headers)
@@ -88,9 +111,10 @@ def _find_header(headers, name):
 def _retry_after(headers):
     value = _find_header(headers, "Retry-After")
     try:
-        return float(1 if value is None else value)
+        wait = float(1 if value is None else value)
     except (TypeError, ValueError):
-        return 1.0
+        wait = 1.0
+    return min(wait, MAX_RETRY_AFTER)
 
 
 def basic(user, token):
