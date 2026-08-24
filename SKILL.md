@@ -79,8 +79,14 @@ is the user's step. Name any other gap once and carry on. A bare ticket id names
 no project yet, so re-check the rows against the slug `resolve` returns in step
 1.
 
-`tk` reads the tokens itself. Leave `secrets.env` closed. When the Atlassian org
-blocks an API token, read `references/jira-cookie-fallback.md`.
+`tk` reads the tokens itself. Leave `secrets.env` closed.
+
+Every ticket read, every ticket write, and every Figma read goes through `tk`,
+with a token from `secrets.env`. Never drive a browser to reach a ticket or a
+design, and never read a browser session, a cookie store, or a keyring for a
+credential. A session cookie is a full account credential, and no token scope
+limits it. When a provider refuses to issue API tokens, say so and stop,
+because that is the user's to settle with their administrator.
 
 Every answer is JSON on stdout. Every failure prints a fixed code under `error`
 and a sentence under `message`, so switch on the code, not the prose. Exit 2
@@ -141,8 +147,10 @@ $T show 59644 --attachments /tmp/tk-59644
   none of the three.
 - An empty list can mean the tracker carries no such key, because the shape
   fills every missing list with `[]`. So an empty `children` on Jira or GitHub
-  is not evidence that no child spec exists. Open the parent ticket in the web
-  UI on those two trackers before you conclude there is nothing to read.
+  is not evidence that no child spec exists. Read the description and the
+  comments for a ticket id, run `$T show` on the id you find, and when the
+  ticket names none, ask the user for the child id. Do not open the tracker in
+  a browser to look.
 
 Done when you can state the wanted behaviour in one sentence and name the file
 that must change.

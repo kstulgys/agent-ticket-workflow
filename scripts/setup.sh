@@ -295,9 +295,9 @@ if want jira; then
         | grep -q accountId; then
       say "Verified. The token reads your account."
     else
-      say "The token did not verify."
-      say "If your organization blocks API tokens, read"
-      say "references/jira-cookie-fallback.md and use the browser session instead."
+      say "The token did not verify. Check the email and the token."
+      say "If your organization blocks API tokens, ask an administrator to"
+      say "allow one. This tool reads Jira through the API and nothing else."
     fi
   fi
 fi

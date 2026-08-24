@@ -120,6 +120,9 @@ and opens the pull request on GitHub. The phases do not change.
 ## What it never does
 
 - Merge. It opens the pull request, reports the url, and stops there.
+- Read a ticket or a design through a browser. Every read is an API call with a
+  token you minted, and the token lives in one file that `tk` reads itself. It
+  never reads your browser session, your cookie store, or your keyring.
 - Invent a behaviour the ticket does not state. A missing string goes back as
   one question, and user-facing copy in another language always does.
 - Guess that a build reached the test environment. The deploy-gated state moves
@@ -169,9 +172,6 @@ table.
 - `git`.
 - The Superpowers plugin. `scripts/setup.sh` installs it.
 - `curl`, for the setup wizard only.
-- `secretstorage` and `cryptography`, for `scripts/jira-cookies.py` only. That
-  script is the fallback for an organization that blocks Jira API tokens, and
-  `tk` never imports it. See `references/jira-cookie-fallback.md`.
 
 ## Install
 
@@ -265,7 +265,6 @@ test.
 - `references/verification.md` — how to prove a fix
 - `references/writing-comments.md` — what a ticket comment says
 - `references/figma.md` — reading a design a ticket links to
-- `references/jira-cookie-fallback.md` — when an org blocks Jira API tokens
 
 ## License
 
