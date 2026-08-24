@@ -47,10 +47,11 @@ class TestSecrets(unittest.TestCase):
             secrets.load(write(self, "GH_TOKEN=abcdefgh12345678\n", mode=0o644))
         self.assertIn("chmod 600", str(cm.exception))
 
-    def test_missing_file_names_the_setup_script(self):
-        with self.assertRaises(secrets.SecretsError) as cm:
-            secrets.load("/nonexistent/secrets.env")
-        self.assertIn("setup.sh", str(cm.exception))
+    def test_a_missing_file_answers_with_no_values(self):
+        # A machine with no token yet is a normal state. Raising here answered
+        # every verb with a missing token, including a run whose real gap was
+        # that no project profile exists.
+        self.assertEqual(secrets.load("/nonexistent/secrets.env"), {})
 
     def test_get_returns_the_value_for_a_present_name(self):
         self.assertEqual(secrets.get("GH_TOKEN", {"GH_TOKEN": "abcdefgh12345678"}),
@@ -61,6 +62,33 @@ class TestSecrets(unittest.TestCase):
             secrets.get("GH_TOKEN", {})
         self.assertIn("GH_TOKEN", str(cm.exception))
         self.assertIn("setup.sh", str(cm.exception))
+
+    def test_get_names_the_azure_stage_for_an_azure_variable(self):
+        with self.assertRaises(secrets.SecretsError) as cm:
+            secrets.get("AZDO_PAT", {})
+        self.assertIn("setup.sh azure", str(cm.exception))
+
+    def test_get_names_the_stage_for_every_provider_prefix(self):
+        for name, stage in (("JIRA_TOKEN", "jira"), ("GH_TOKEN", "github"),
+                            ("FIGMA_TOKEN", "figma")):
+            with self.subTest(name=name):
+                with self.assertRaises(secrets.SecretsError) as cm:
+                    secrets.get(name, {})
+                self.assertIn(f"setup.sh {stage}", str(cm.exception))
+
+    def test_get_names_the_bare_command_for_a_project_value(self):
+        # A project scoped value such as a preview bypass has no stage. Naming
+        # one would send the reader to a stage that never writes it.
+        with self.assertRaises(secrets.SecretsError) as cm:
+            secrets.get("NORTHWIND_BYPASS_HILLCREST", {})
+        self.assertIn("setup.sh", str(cm.exception))
+        self.assertNotIn("setup.sh azure", str(cm.exception))
+
+    def test_an_empty_value_reads_as_missing(self):
+        # The old behaviour, pinned. A key with no value is a half-finished
+        # setup, and treating it as present sends an empty credential.
+        with self.assertRaises(secrets.SecretsError):
+            secrets.get("GH_TOKEN", {"GH_TOKEN": ""})
 
     def test_scrub_replaces_every_loaded_value(self):
         secrets.load(write(self, "GH_TOKEN=abcdefgh12345678\n"))

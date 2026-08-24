@@ -12,9 +12,21 @@ class SecretsError(Exception):
 
 
 def load(path=None):
+    """Every value in secrets.env, or nothing when the file is not there yet.
+
+    An absent file is not a failure. It is the state of a machine that has not
+    needed a token yet, and the run that follows may need none. get raises the
+    error, because get knows which variable a call wanted and which stage
+    writes it. Raising here instead answered every verb with the same sentence,
+    so a run whose real gap was a missing project profile reported a missing
+    token.
+
+    A file that exists with a wider mode is still a refusal. That one is a
+    fact about the machine, and no later call can repair it.
+    """
     path = path or DEFAULT_PATH
     if not os.path.exists(path):
-        raise SecretsError(f"no secrets file at {path}. Run {SETUP} to create it.")
+        return {}
     mode = stat.S_IMODE(os.stat(path).st_mode)
     if mode != 0o600:
         raise SecretsError(f"{path} has mode {oct(mode)}. Run: chmod 600 {path}")
@@ -37,9 +49,26 @@ def load(path=None):
     return values
 
 
+# The wizard stage that writes each variable. A run needs one provider, so the
+# error names one stage, not the whole wizard. A project scoped value such as
+# NORTHWIND_BYPASS_HILLCREST matches no prefix, and its error names the bare
+# command, because no stage writes it.
+STAGES = (("AZDO_", "azure"), ("JIRA_", "jira"), ("GH_", "github"),
+          ("FIGMA_", "figma"))
+
+
+def stage_for(name):
+    """The setup stage that writes one variable, or None when none does."""
+    return next((stage for prefix, stage in STAGES
+                 if str(name).startswith(prefix)), None)
+
+
 def get(name, values):
     if not values.get(name):
-        raise SecretsError(f"{name} is not set in secrets.env. Run {SETUP} to add it.")
+        stage = stage_for(name)
+        where = f"{SETUP} {stage}" if stage else SETUP
+        raise SecretsError(
+            f"{name} is not set in secrets.env. Run {where} to add it.")
     return values[name]
 
 
