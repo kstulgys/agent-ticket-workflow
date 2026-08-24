@@ -59,25 +59,40 @@ whether the plugin is loaded, so no command asks. When those names are absent,
 loads it. Say that once and carry on, because the phases below still describe
 the work.
 
-## 0. Preflight
+## 0. Start where the user is
+
+There is no setup gate. The first command is the one that answers the question
+the user asked, and a gap answers for itself.
 
 ```bash
 T=~/.claude/skills/agent-ticket-workflow/scripts/tk
-$T doctor
+$T resolve 5438
 ```
 
-Exit 0 means every provider answered. Exit 1 prints `projects`, one row per
-provider with its own `ok`, and `fix`, one command per gap. A project whose
-pull request host is a second provider gets two rows, and `role` names which
-one the row read: `tracker` or `host`.
+Every failure prints a fixed code under `error` and a sentence under `message`,
+so switch on the code, not the prose.
 
-`doctor` reads every profile on disk, so a stale token on a project this run
-never touches also exits 1. Stop only when a failing row is the project this run
-needs. Then hand the user its `fix` command, usually `scripts/setup.sh
-<provider>` run from `~/.claude/skills/agent-ticket-workflow`, because minting a token
-is the user's step. Name any other gap once and carry on. A bare ticket id names
-no project yet, so re-check the rows against the slug `resolve` returns in step
-1.
+| `error` | What it means | Your next step |
+|---|---|---|
+| none | a profile owns this ticket | step 2 |
+| `ambiguous` | two profiles match, exit 2 | ask the user which slug, then pass `--slug` on every verb that follows |
+| `unresolved` | no profile owns it | the bootstrap in step 1 |
+| `secrets` | a token variable is not set. The message names the variable and the one stage that writes it | run that stage, then repeat the command |
+| `http` with 401 or 403 | the token is set and the provider refused it | run that stage again, then repeat the command |
+| `profile` | a `config.json` on disk is unreadable. The message names the file | fix that one file |
+
+Every answer is JSON on stdout. Exit 2 means one thing: a ticket matched more
+than one project and a human must choose. Everything else is exit 1, a bad
+command line included.
+
+Ask for nothing you have not been refused. A run that asks for four tokens
+before it reads the ticket spends the user's attention on three providers this
+ticket does not touch.
+
+`$T doctor` reads every profile and every provider at once. Run it when a call
+fails for a reason no code above explains, or when the user asks what is
+configured. It is a diagnostic, and never a first step: on a machine with no
+profile yet its answer is a failure, and that failure is not about this ticket.
 
 `tk` reads the tokens itself. Leave `secrets.env` closed.
 
@@ -87,11 +102,6 @@ design, and never read a browser session, a cookie store, or a keyring for a
 credential. A session cookie is a full account credential, and no token scope
 limits it. When a provider refuses to issue API tokens, say so and stop,
 because that is the user's to settle with their administrator.
-
-Every answer is JSON on stdout. Every failure prints a fixed code under `error`
-and a sentence under `message`, so switch on the code, not the prose. Exit 2
-means one thing: a ticket matched more than one project and a human must choose.
-Everything else is exit 1, a bad command line included.
 
 Three entry points fork here.
 
@@ -118,9 +128,61 @@ Exit 2 answers `slugs` with the candidates. Ask the user which project, then
 pass `--slug <slug>` on every verb that follows. `tk resolve` takes no `--slug`,
 and it ignores one in silence.
 
-A project with no profile is a new project. Write
-`~/.claude/ticket-workflow/projects/<slug>/config.json` and `notes.md` first,
-using `references/profiles.md`.
+### No profile owns this ticket
+
+This is a new project, and the machine already holds most of what a profile
+needs. Read first, ask second.
+
+```bash
+$T detect
+```
+
+`detect` reads the git remote and the git config in the working directory. It
+answers `provider`, `owner`, `repo`, `org`, `project`, `base_branch`, and the
+commit identity. A null is a field it could not read, and a null is the only
+thing worth a question. It makes no network call and needs no token.
+
+1. The tracker. `detect` names it when the remote is GitHub or Azure DevOps. A
+   Jira tracker never appears in a git remote, and neither does a tracker that
+   lives apart from the code. So when `provider` is null, or when the id the
+   user typed does not look like that provider's ids, ask the user once, with a
+   select of three options: GitHub, Azure Boards, Jira. One question, three
+   options, no free text.
+2. The token, and only when it is missing. Run `scripts/setup.sh <provider>`
+   from `~/.claude/skills/agent-ticket-workflow`. That stage opens the
+   provider's token page, names the scopes to select, writes the value to
+   `secrets.env` itself, and verifies it. You never see the value. Never ask the
+   user to paste a token into the chat, and never read one from a browser
+   session, a cookie store, or a keyring.
+3. The values `detect` left null and the provider needs: the Azure organization
+   and project, the Jira site and project key, or the GitHub owner and
+   repository. Ask for these together, in one message.
+4. Write the profile.
+
+```bash
+$T init --slug northwind --tracker azure --ticket 5438 \
+    --org https://dev.azure.com/northwind --project "Contoso migration"
+```
+
+`init` fills the rest: the id pattern from the ticket you passed, the repo path
+and the host block from `detect`, `people.self` from the provider's own account,
+and the four buckets. It writes `notes.md` as a stub. It refuses to overwrite a
+profile that is already there, and it writes nothing at all when a call fails,
+so a missing token means you mint it and run the same command again.
+
+Read the `next` list in its answer. Those are the fields no machine can fill,
+and two of them cost a run when they stay empty.
+
+- `notes.md` has no verify gate yet. Ask the user for the commands that prove a
+  change in this repo, and write them into the stub before step 4.
+- The four buckets hold no states. The first time a ticket needs one, ask the
+  user which column their board uses for it, then write it into `config.json`.
+  Until then the routing travels in the comment, which is already how this
+  routine works on Azure and Jira.
+- There is no `deploy_gate`. Ask for the state a tested build reaches the first
+  time a ticket gets there.
+
+`references/profiles.md` documents every key, for the fields you add by hand.
 
 ## 2. Read the ticket in full
 
@@ -140,6 +202,12 @@ $T show 59644 --attachments /tmp/tk-59644
   `--specs` prints resolved values: hex, pixels, font sizes. Mapping a value back
   to a brand design token is your own step, because the Figma variables endpoint
   is Enterprise only.
+  A ticket with no Figma url needs no Figma token, so this is the first place
+  that asks for one. When the call answers `secrets`, run
+  `scripts/setup.sh figma`, then repeat it. When it answers `http` with 403, the
+  token is real and the file is not shared with the account that minted it, so
+  ask the user to share the file or to mint a token on an account that can read
+  it. Never open the design in a browser instead.
 - `parent` and `children` matter. A bug states the loose what, and its child task
   names the how: the exact function, the config entry, the env var. Run `$T show`
   on the child too, and treat the child's description as the spec. Azure fills
