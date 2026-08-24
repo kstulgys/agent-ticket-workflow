@@ -54,8 +54,70 @@ def check(profiles, adapters, hosts=None):
             # answer whether a run will work before it touches a real ticket.
             providers[key] = bool(row.get("ok")) and providers.get(key, True)
             projects.append(row)
+        # A row only when there is something to report. Every provider row
+        # answers for a token, and this one answers for the file, so a row
+        # saying nothing is wrong would add a line per project to every clean
+        # report. The fix list is the actionable half, and it names the slug.
+        gaps = _profile_gaps(profile)
+        if gaps:
+            projects.append({"slug": slug, "role": "profile", "provider": None,
+                             "ok": False, "error": "; ".join(gaps)})
+            for gap in gaps:
+                fix.append(f"{slug}: {gap}. Edit config.json.")
     return {"ok": all(row.get("ok") for row in projects),
             "providers": providers, "projects": projects, "fix": sorted(set(fix))}
+
+
+def _placeholder(value):
+    """True when a value is an example placeholder, not a real identity.
+
+    The example profiles ship a guid whose hex digits are all one character,
+    and a copied profile keeps it. A real Azure identity is never one repeated
+    digit, so this shape is safe to refuse.
+    """
+    digits = str(value or "").replace("-", "")
+    return len(digits) >= 8 and len(set(digits)) == 1
+
+
+def _profile_gaps(profile):
+    """Every profile field no API call reads. It makes no network call.
+
+    doctor reads two routes per project, and neither looks at a bucket role, a
+    people identity, or a repository guid. So a profile copied from the examples
+    and never edited passed green here, and the failure arrived later at tk pr
+    create as a 404 on a placeholder guid, which reads as a permissions problem.
+
+    An absent optional block passes, because a tracker only project is valid. A
+    block that is present with a missing required key fails.
+    """
+    gaps = []
+    people = profile.get("people") or {}
+    for role in sorted(people):
+        who = cli.person(profile, role)
+        if not who:
+            gaps.append(f"people.{role} holds no id, accountId, or login")
+        elif _placeholder(who):
+            gaps.append(f"people.{role} still holds the example placeholder id")
+    for name in sorted(profile.get("buckets") or {}):
+        role = ((profile.get("buckets") or {}).get(name) or {}).get("assignee")
+        if role and role not in people:
+            gaps.append(f"buckets.{name} assigns the role {role}, and the "
+                        "people block holds no entry for it")
+    host = profile.get("host") or {}
+    # Only this host kind needs the two guids, and it is the kind that gets no
+    # row of its own, because it shares its token with the tracker.
+    if host.get("kind") == "azure-repos":
+        for key in ("repo_id", "project_id"):
+            if not host.get(key):
+                gaps.append(f"host.{key} is missing, and the pull request "
+                            "route cannot run without it")
+            elif _placeholder(host.get(key)):
+                gaps.append(f"host.{key} still holds the example placeholder guid")
+    # host.local_path is deliberately not checked here. Every gap above is a
+    # fact about the file, so this answer does not change with the machine. A
+    # path that is not cloned yet is a normal state during setup, and tk git
+    # already fails on it with an error that names the directory.
+    return gaps
 
 
 def _row(slug, role, kind, adapter, fix):

@@ -152,8 +152,13 @@ class TestDoctor(unittest.TestCase):
         # azure-repos is the host spelling of azure. setup.sh takes azure and
         # refuses azure-repos, so the raw kind here would hand the user the one
         # command this verb exists to name, and it would not run.
+        # The two guids are required for an azure-repos host, so the profile
+        # check reports them when they are absent. This test is about the kind
+        # folding, so give the stub a complete host block.
         profiles = {"x": {"slug": "x", "tracker": {"kind": "jira"},
-                          "host": {"kind": "azure-repos"}}}
+                          "host": {"kind": "azure-repos",
+                                   "repo_id": "a1b2c3d4-0000-4000-8000-abcdef123456",
+                                   "project_id": "b2c3d4e5-0000-4000-8000-abcdef123456"}}}
         got = doctor.check(profiles, {"x": FakeAdapter(who={"name": "k"})},
                            {"x": FakeAdapter(error="401 unauthorized")})
         self.assertEqual([row["provider"] for row in got["projects"]],
@@ -195,6 +200,90 @@ class TestDoctor(unittest.TestCase):
         printed = json.dumps(got, sort_keys=True)
         self.assertNotIn(token, printed)
         self.assertEqual(printed.count("***"), 2)
+
+
+class TestProfileCheck(unittest.TestCase):
+    """The fields no API call reads.
+
+    doctor made two calls per project and read no other field, so a profile
+    copied from the examples and never edited passed green. The failure then
+    arrived at tk pr create as a 404 on a placeholder guid, which reads as a
+    permissions problem.
+    """
+
+    def run_check(self, profile):
+        return doctor.check({"x": dict(profile, slug="x")},
+                            {"x": FakeAdapter(who={"name": "k"})})
+
+    def test_a_bucket_naming_a_role_the_people_block_lacks_is_reported(self):
+        # cli.apply_bucket raises for this at write time, which is one ticket
+        # too late.
+        got = self.run_check({"tracker": {"kind": "azure"},
+                              "buckets": {"fixable-here": {"assignee": "nobody"}},
+                              "people": {"self": {"id": "real-identity-1"}}})
+        self.assertFalse(got["ok"])
+        joined = " ".join(got["fix"])
+        self.assertIn("buckets.fixable-here", joined)
+        self.assertIn("nobody", joined)
+
+    def test_a_people_entry_with_no_identity_key_is_reported(self):
+        got = self.run_check({"tracker": {"kind": "azure"},
+                              "people": {"self": {"name": "Example Dev"}}})
+        self.assertFalse(got["ok"])
+        self.assertIn("people.self", " ".join(got["fix"]))
+
+    def test_an_azure_repos_host_with_no_guids_is_reported(self):
+        # This host kind gets no row of its own, because it shares its token
+        # with the tracker, so nothing else ever looked at these two keys.
+        got = self.run_check({"tracker": {"kind": "azure"},
+                              "host": {"kind": "azure-repos"}})
+        self.assertFalse(got["ok"])
+        joined = " ".join(got["fix"])
+        self.assertIn("host.repo_id", joined)
+        self.assertIn("host.project_id", joined)
+
+    def test_a_placeholder_identity_is_reported(self):
+        got = self.run_check({
+            "tracker": {"kind": "azure"},
+            "people": {"self": {"id": "33333333-3333-3333-3333-333333333333"}}})
+        self.assertFalse(got["ok"])
+        self.assertIn("placeholder", " ".join(got["fix"]))
+
+    def test_the_shipped_example_profile_is_not_ok(self):
+        # The whole point. Before this check, a copied example passed green with
+        # both provider calls answering fine.
+        got = self.run_check({
+            "tracker": {"kind": "azure"},
+            "host": {"kind": "azure-repos",
+                     "repo_id": "11111111-1111-1111-1111-111111111111",
+                     "project_id": "22222222-2222-2222-2222-222222222222"},
+            "people": {"self": {"id": "33333333-3333-3333-3333-333333333333"}}})
+        self.assertFalse(got["ok"])
+        rows = {row["role"]: row for row in got["projects"]}
+        self.assertIn("profile", rows)
+        self.assertFalse(rows["profile"]["ok"])
+
+    def test_a_complete_profile_stays_ok_and_adds_no_row(self):
+        # The check must not fail every profile, and a clean report must not
+        # grow a row per project that says nothing is wrong.
+        got = self.run_check({
+            "tracker": {"kind": "azure"},
+            "host": {"kind": "azure-repos",
+                     "repo_id": "a1b2c3d4-0000-4000-8000-abcdef123456",
+                     "project_id": "b2c3d4e5-0000-4000-8000-abcdef123456"},
+            "buckets": {"fixable-here": {"assignee": "self"},
+                        "needs-clarification": {"assignee": None}},
+            "people": {"self": {"id": "c3d4e5f6-0000-4000-8000-abcdef123456"}}})
+        self.assertTrue(got["ok"])
+        self.assertEqual(got["fix"], [])
+        self.assertEqual([row["role"] for row in got["projects"]], ["tracker"])
+
+    def test_a_tracker_only_profile_passes_with_no_host_block(self):
+        # An absent optional block is valid. Only a present block with a
+        # missing required key is a gap.
+        got = self.run_check({"tracker": {"kind": "jira"}})
+        self.assertTrue(got["ok"])
+        self.assertEqual(got["fix"], [])
 
 
 if __name__ == "__main__":
