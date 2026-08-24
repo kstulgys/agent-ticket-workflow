@@ -288,7 +288,7 @@ if want jira; then
     SKIPPED+=("set up the Jira token: re-run scripts/setup.sh jira")
   else
     step "On the page that opens, select Create API token."
-    step "Name it ticket-workflow. Copy the value now, because Jira shows it once."
+    step "Name it agent-ticket-workflow. Copy the value now, because Jira shows it once."
     open_url "https://id.atlassian.com/manage-profile/security/api-tokens"
     ask JIRA_EMAIL "Your Atlassian account email:"
     ask_secret JIRA_TOKEN "Paste the API token:"
@@ -316,7 +316,7 @@ if want github; then
   ask_secret GH_TOKEN "Paste the token:"
   write_env GH_TOKEN "$GH_TOKEN"
   if curl_cfg header "Authorization: Bearer $GH_TOKEN" \
-      | curl -sf --config - -H "User-Agent: ticket-workflow" \
+      | curl -sf --config - -H "User-Agent: agent-ticket-workflow" \
         https://api.github.com/user \
       | grep -q '"login"'; then
     say "Verified. The token reads your account."

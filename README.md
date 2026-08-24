@@ -35,8 +35,9 @@ description, every comment, the attachments, and any child task that names the
 actual mechanism. It traces the cause, writes the failing test, makes the
 change, runs that project's verify gate, and opens the pull request with the
 ticket linked and the profile's reviewer added. Then it comments and applies the
-routing for `fixable-here`, which on the northwind example is In Progress and
-assigned to you.
+routing for `fixable-here`, which on the northwind example is In Progress for a
+task, Committed for a bug, and assigned to you. That state is a map from item
+type to state, because one board rarely uses one column for both.
 
 You get a pull request url. Merging stays your call.
 
@@ -136,15 +137,21 @@ and opens the pull request on GitHub. The phases do not change.
 
 Two parts, split on purpose.
 
-`SKILL.md` holds the routine in prose. It has eight numbered phases and three
-modes. It never names an endpoint or a body format.
+`SKILL.md` holds the routine in prose. It has eight numbered phases, and three
+entry points that fork away from them: resume mode, batch mode, and the gate
+path. It never names an endpoint or a body format.
 
 `scripts/tk` holds every API call. So a provider trap is a guard in code with a
 test, not a warning in prose that an agent may skip. It prints JSON on stdout.
 Every failure prints a fixed code under `error` and a sentence under `message`,
 so a caller switches on the code and not on the prose.
 
-Project facts live outside the repository, in
+Two directories carry the same words, and they are not the same place. The skill
+itself lives in `~/.claude/skills/agent-ticket-workflow/`, which is this
+repository. Your own data lives in `~/.claude/ticket-workflow/`, which this
+repository never writes to and never reads at build time.
+
+Project facts live in that second directory, in
 `~/.claude/ticket-workflow/projects/<slug>/`. `config.json` holds the machine
 facts, such as the branch pattern and the state each bucket maps to. `notes.md`
 holds the knowledge an agent needs but a schema cannot express. Nothing about
@@ -170,7 +177,9 @@ table.
 - Python 3.11 or later. `tk` itself is standard library only, with no
   dependencies and no virtualenv.
 - `git`.
-- The Superpowers plugin. `scripts/setup.sh` installs it.
+- The Superpowers plugin, for the method below. It is optional. Without it the
+  eight phases still run, and the routine says so once and carries on. Add it
+  with `scripts/setup.sh superpowers`.
 - `curl`, for the setup wizard only.
 
 ## Install
@@ -183,9 +192,13 @@ git clone https://github.com/kstulgys/agent-ticket-workflow.git \
   ~/.claude/skills/agent-ticket-workflow
 ```
 
-That is the whole install. There is no setup step, no token to mint yet, and no
-config file to write. The skill asks for a credential the first time one is
-refused, and for one provider only.
+That is the whole install. There is no token to mint yet and no config file to
+write. The skill asks for a credential the first time one is refused, and for
+one provider only.
+
+One optional step is left, and it is not a gate. `scripts/setup.sh superpowers`
+installs the plugin the method section names, and a restart of Claude Code loads
+it. Skip it and the phases still run.
 
 ### Or paste this to your agent
 
@@ -198,9 +211,10 @@ Install the agent-ticket-workflow skill for me.
    match.
 2. From that directory, run: python3 -m unittest discover -s tests -t tests
    Tell me the result.
-3. Do not mint any token, do not run scripts/setup.sh, and do not write any
-   config file or project profile. The skill asks for what it needs when it
-   needs it.
+3. Do not mint any token and do not write any config file or project profile.
+   The skill asks for what it needs when it needs it. You may run
+   scripts/setup.sh superpowers, which installs a plugin and asks for no token.
+   Run no other stage of that script.
 4. Then tell me it is ready, and that I start a job by typing: work on <ticket>
 ```
 
@@ -230,8 +244,8 @@ Three questions are left, and no machine can answer them:
 
 The agent asks for each one the first time it is needed, not before.
 
-Your profile lives in `~/.claude/ticket-workflow/projects/<slug>/`, outside this
-repository. Nothing about your projects is ever committed here.
+`tk init` writes the profile to `~/.claude/ticket-workflow/projects/<slug>/`,
+the data directory named above, never into this repository.
 
 `examples/projects/northwind` is an Azure Boards tracker with an Azure Repos
 host. `examples/projects/globex` is a Jira tracker with a GitHub host, which

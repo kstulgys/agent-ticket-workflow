@@ -69,7 +69,7 @@ class GitHub:
     def _headers(self):
         return {"Authorization": f"Bearer {self.token}",
                 "Accept": "application/vnd.github+json",
-                "User-Agent": "ticket-workflow"}
+                "User-Agent": "agent-ticket-workflow"}
 
     def _repo_url(self, path):
         return f"{API}/repos/{self.owner}/{self.repo}/{path.lstrip('/')}".rstrip("/")
