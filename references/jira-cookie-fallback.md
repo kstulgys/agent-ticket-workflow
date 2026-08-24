@@ -7,28 +7,32 @@ from a browser that already holds the session.
 
 ```bash
 cd ~/.claude/skills/agent-ticket-workflow
-python3 scripts/jira-cookies.py    # writes /tmp/jira-state.json from your Chrome profile
+python3 scripts/jira-cookies.py --site your-site.atlassian.net
 ```
+
+It writes `~/.claude/ticket-workflow/jira-state.json`, mode 0600, in the same
+directory as `secrets.env`. Pass `--out` for another path.
 
 The script decrypts the Chrome cookie database, so it needs `secretstorage`,
 `cryptography`, and an unlocked login keyring. It finds the profile by the
-session cookie, and the site it looks for is a constant at the top of the file.
-Edit that constant for another site.
+session cookie. `--site` is required and has no default, because a default
+reads the wrong tenant in silence.
 
-It writes the same `{cookies, origins}` file that `agent-browser state save`
-writes, so the browser loads it as it is. Confirm the identity before you trust
-any other call:
+The file holds the same `{cookies, origins}` shape that `agent-browser state
+save` writes, so the browser loads it as it is. Confirm the identity before you
+trust any other call:
 
 ```bash
-agent-browser state load /tmp/jira-state.json
+agent-browser state load ~/.claude/ticket-workflow/jira-state.json
 agent-browser open "https://<site>/rest/api/3/myself"
 agent-browser get text body        # your accountId, not a login page
 ```
 
 The script is the path that needs no Chrome restart. `agent-browser
---auto-connect state save /tmp/jira-state.json` reads a live Chrome instead.
-That Chrome must have started with `--remote-debugging-port=9222`, so the user
-closes and reopens their browser first.
+--auto-connect state save ~/.claude/ticket-workflow/jira-state.json` reads a
+live Chrome instead. That Chrome must have started with
+`--remote-debugging-port=9222`, so the user closes and reopens their browser
+first.
 
 From a page on that origin, every call is a same-origin `fetch` with
 `credentials: 'include'`:
@@ -50,5 +54,9 @@ The endpoints and the body formats match what the Jira adapter uses, so read
 body.
 
 Two rules. Re-authenticate at the start of every session, because the file
-holds live session tokens. At the end of the run, `rm -f /tmp/jira-state.json`
-and `agent-browser close --all`.
+holds live session tokens. At the end of the run, `rm -f
+~/.claude/ticket-workflow/jira-state.json` and `agent-browser close --all`.
+
+Deleting the file is not enough on its own. A session token stays valid until
+you sign out of Jira or it expires, so sign out too when a session has been
+written.

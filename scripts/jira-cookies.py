@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Decrypt the logged-in GLOBEX Atlassian session from Chrome -> /tmp/jira-state.json.
+"""Decrypt a logged-in Atlassian session from Chrome into a private state file.
 
 Why this exists: this environment has no Atlassian MCP, so every Jira read/write
 goes through the user's live browser session + the Jira REST API. This script
@@ -7,16 +7,25 @@ produces the cookie state you inject into a browser tab (page.setCookie) and,
 from the same file, the Cookie header you use to download attachments.
 
 Usage:
-    python3 scripts/jira-cookies.py        # writes /tmp/jira-state.json, prints a summary
+    python3 scripts/jira-cookies.py --site your-site.atlassian.net
+
+    --site is required. There is no default, because a default site works for
+    nobody and silently reads the wrong tenant.
+    --out overrides the path. It defaults to
+    ~/.claude/ticket-workflow/jira-state.json, the same 0700 directory that
+    holds secrets.env.
 
 Requires: secretstorage + cryptography (`pip install --user secretstorage cryptography`
 if missing) and an unlocked gnome login keyring (DISPLAY + DBUS present in a desktop
 session). Read-only on Chrome's cookie DB.
 
-Security: /tmp/jira-state.json holds LIVE session tokens. Delete it when you finish
-(`rm -f /tmp/jira-state.json`) and close the browser — the workflow does this each turn.
+Security: the state file holds LIVE session tokens, which are a full account
+credential and are not limited by the API token scopes. It is written 0600.
+Deleting it is not enough on its own: the session stays valid until you sign out
+of Jira or it expires. So sign out, and close the browser, when you finish.
 """
 
+import argparse
 import glob
 import hashlib
 import json
@@ -28,8 +37,7 @@ import secretstorage
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 CHROME = os.path.expanduser("~/.config/google-chrome")
-TARGET = "globex.atlassian.net"
-OUT = "/tmp/jira-state.json"
+DEFAULT_OUT = os.path.expanduser("~/.claude/ticket-workflow/jira-state.json")
 
 
 def chrome_key() -> bytes:
@@ -42,30 +50,63 @@ def chrome_key() -> bytes:
     sys.exit("Chrome keyring secret not found (is the login keyring unlocked?)")
 
 
-def find_profile() -> str:
-    """Return the Cookies DB of the profile that holds the globexnl session.
+def find_profile(site: str) -> str:
+    """Return the Cookies DB of the profile that holds the session for site.
 
-    Don't hardcode 'Profile 4' — the Example profile moves. Pick whichever profile
-    actually has the tenant.session.token for globexnl.
+    Don't hardcode 'Profile 4' — the profile moves. Pick whichever profile
+    actually has the tenant.session.token for the site.
     """
     for db in glob.glob(f"{CHROME}/*/Cookies"):
         try:
             con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
             hit = con.execute(
                 "SELECT 1 FROM cookies WHERE host_key LIKE ? AND name='tenant.session.token'",
-                (f"%{TARGET}",),
+                (f"%{site}",),
             ).fetchone()
             con.close()
             if hit:
                 return db
         except sqlite3.Error:
             continue
-    sys.exit(f"No Chrome profile has a {TARGET} session — log in to Jira in Chrome first.")
+    # Name the directory that was searched. On macOS Chrome keeps its profiles
+    # somewhere else, and "log in first" sends that reader looking in the wrong
+    # place.
+    sys.exit(f"No Chrome profile under {CHROME} has a {site} session. "
+             "Log in to Jira in Chrome first, or pass the right profile "
+             "directory by editing CHROME.")
+
+
+def write_state(state: dict, out_path: str) -> None:
+    """Writes the state file so only its owner can read it.
+
+    A session cookie is a full account credential, so this file gets the floor
+    secrets.env gets. O_EXCL refuses an existing file and O_NOFOLLOW refuses a
+    symlink, so a planted path cannot redirect the write, and an older session
+    cannot stay behind under a mode this run did not set. The unlink then keeps
+    the script re-runnable, which the workflow needs every turn.
+    """
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+    try:
+        handle = os.open(out_path, flags, 0o600)
+    except FileExistsError:
+        os.unlink(out_path)
+        handle = os.open(out_path, flags, 0o600)
+    with os.fdopen(handle, "w", encoding="utf-8") as fh:
+        json.dump(state, fh)
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(
+        prog="jira-cookies.py",
+        description="Decrypt a live Atlassian session from Chrome into a 0600 state file.")
+    parser.add_argument("--site", required=True,
+                        help="your Atlassian site, for example acme.atlassian.net")
+    parser.add_argument("--out", default=DEFAULT_OUT,
+                        help=f"state file to write (default: {DEFAULT_OUT})")
+    args = parser.parse_args()
+
     key = chrome_key()
-    db = find_profile()
+    db = find_profile(args.site)
 
     def dec(v: bytes) -> str:
         if v[:3] == b"v11":
@@ -77,9 +118,13 @@ def main() -> None:
 
     con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
     state = {"cookies": [], "origins": []}
+    # Filter on the site the caller named, not on every Atlassian host in the
+    # profile. A session for another tenant is a credential this run has no
+    # reason to decrypt, and it would land in the same file.
     for h, n, pa, sec, ho, exp, sm, ev in con.execute(
         "SELECT host_key,name,path,is_secure,is_httponly,expires_utc,samesite,encrypted_value "
-        "FROM cookies WHERE host_key LIKE '%atlassian%'"
+        "FROM cookies WHERE host_key LIKE ?",
+        (f"%{args.site}",),
     ):
         state["cookies"].append(
             {
@@ -93,13 +138,15 @@ def main() -> None:
                 "sameSite": {0: "None", 1: "Lax", 2: "Strict"}.get(sm, "Lax"),
             }
         )
-    json.dump(state, open(OUT, "w"))
+    con.close()
+    write_state(state, args.out)
     has_token = any(
-        c["name"] == "tenant.session.token" and TARGET in c["domain"] for c in state["cookies"]
+        c["name"] == "tenant.session.token" and args.site in c["domain"]
+        for c in state["cookies"]
     )
     print(
         f"profile={os.path.dirname(db)!r} cookies={len(state['cookies'])} "
-        f"{TARGET}_token={'yes' if has_token else 'MISSING'} -> {OUT}"
+        f"{args.site}_token={'yes' if has_token else 'MISSING'} -> {args.out}"
     )
     if not has_token:
         sys.exit(1)
