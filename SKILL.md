@@ -127,7 +127,8 @@ $T show 59644 --attachments /tmp/tk-59644
 - Read every entry in `comments`. A product owner reply often carries the answer,
   including the answer to a question you asked last time.
 - Read every downloaded file in `attachments`. A screenshot that decides the fix
-  gets opened, not guessed at.
+  gets opened, not guessed at. Azure and Jira carry attachments. GitHub does
+  not, so on GitHub read the issue body for inline images instead.
 - Every url in `figma_urls` is an instruction. Pull the frame with
   `$T figma <url> --render /tmp/frame.png --specs` and read `references/figma.md`.
   `--specs` prints resolved values: hex, pixels, font sizes. Mapping a value back
@@ -135,7 +136,13 @@ $T show 59644 --attachments /tmp/tk-59644
   is Enterprise only.
 - `parent` and `children` matter. A bug states the loose what, and its child task
   names the how: the exact function, the config entry, the env var. Run `$T show`
-  on the child too, and treat the child's description as the spec.
+  on the child too, and treat the child's description as the spec. Azure fills
+  `parent`, `children`, and `links`. Jira fills `parent` only. GitHub fills
+  none of the three.
+- An empty list can mean the tracker carries no such key, because the shape
+  fills every missing list with `[]`. So an empty `children` on Jira or GitHub
+  is not evidence that no child spec exists. Open the parent ticket in the web
+  UI on those two trackers before you conclude there is nothing to read.
 
 Done when you can state the wanted behaviour in one sentence and name the file
 that must change.

@@ -164,10 +164,14 @@ table.
 
 ## Requirements
 
-- Python 3.11 or later. Standard library only, no dependencies, no virtualenv.
+- Python 3.11 or later. `tk` itself is standard library only, with no
+  dependencies and no virtualenv.
 - `git`.
 - The Superpowers plugin. `scripts/setup.sh` installs it.
 - `curl`, for the setup wizard only.
+- `secretstorage` and `cryptography`, for `scripts/jira-cookies.py` only. That
+  script is the fallback for an organization that blocks Jira API tokens, and
+  `tk` never imports it. See `references/jira-cookie-fallback.md`.
 
 ## Install
 
@@ -190,6 +194,10 @@ scripts/setup.sh
 Run one step on its own with `scripts/setup.sh superpowers`, or `azure`, `jira`,
 `github`, or `figma`.
 
+The wizard asks for your Azure DevOps organization and your Atlassian site,
+because no default can be right. Set `AZDO_ORG` and `JIRA_SITE` in the
+environment to answer without a prompt.
+
 ## Set up a project
 
 Copy an example and edit it:
@@ -197,8 +205,16 @@ Copy an example and edit it:
 ```bash
 mkdir -p ~/.claude/ticket-workflow/projects/myproject
 cp examples/projects/northwind/config.json \
+  examples/projects/northwind/notes.md \
   ~/.claude/ticket-workflow/projects/myproject/
 ```
+
+The directory name is the project slug, and `tk` keys every profile by it.
+Change the `slug` field in `config.json` to that same name. Messages built from
+the profile print that field, so a stale value names a project you do not have.
+
+`notes.md` holds what a decision needs. Phase 1 of the routine reads it before
+it touches code, so an empty one costs a run.
 
 `examples/projects/northwind` is an Azure Boards tracker with an Azure Repos
 host. `examples/projects/globex` is a Jira tracker with a GitHub host, which
@@ -221,13 +237,13 @@ with its own `ok`, and a `fix` command per gap.
 tk doctor                     every provider and every project
 tk resolve <id|key|url>       which project owns this ticket
 tk mine                       tickets assigned to you
-tk show <id>                  the ticket, its comments and its attachments
+tk show <id>                  the normalised ticket, with its comments
 tk comment <id>               post a comment
 tk state <id>                 set the state and the owner
 tk assign <id>                set the owner
 tk pr <create|threads|comment|describe|attach>
 tk figma <url>                render a frame, or list a file
-tk git -- <args>              git with the credential in the environment
+tk git --slug S -- <args>     git with the credential in the environment
 ```
 
 Exit codes: 0 done, 1 error, 2 only when a ticket matches more than one project
