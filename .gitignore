@@ -1,2 +1,6 @@
 __pycache__/
 *.pyc
+
+# Working notes from the improve skill. They describe work that is already in
+# the history, so the repository does not carry them.
+/plans/
