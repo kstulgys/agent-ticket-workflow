@@ -12,6 +12,15 @@ set -euo pipefail
 # Wizard library: delightful, consistent UX, identical across every wizard.
 # ──────────────────────────────────────────────────────────────────────────
 
+# WINDOWS is set under Git Bash, MSYS2, and Cygwin: a POSIX shell on a machine
+# that is not POSIX. There chmod grants nothing, a browser needs a Windows
+# opener, and access to a file is an ACL. Every branch below that reads this
+# leaves the POSIX path exactly as it was.
+WINDOWS=""
+case "$(uname -s 2>/dev/null || true)" in
+  MINGW*|MSYS*|CYGWIN*) WINDOWS=1 ;;
+esac
+
 if [[ -t 1 ]] && command -v tput >/dev/null 2>&1 && [[ "$(tput colors 2>/dev/null || echo 0)" -ge 8 ]]; then
   BOLD=$(tput bold); DIM=$(tput dim); RESET=$(tput sgr0)
   BLUE=$(tput setaf 4); GREEN=$(tput setaf 2); YELLOW=$(tput setaf 3)
@@ -62,13 +71,20 @@ note() { printf '  %s%s%s\n' "$DIM" "$1" "$RESET"; }
 warn() { printf '  %s⚠ %s%s\n' "$YELLOW" "$1" "$RESET"; }
 
 # open_url URL opens it in the human's browser, cross-platform incl. WSL.
+#
+# cmd start comes first on Windows. explorer.exe opens the page and then
+# answers non-zero anyway, so it fired the warning below on every run and told
+# the human the browser had failed while the page was in front of them. The
+# same explorer call is the WSL fallback when wslview is missing, so its exit
+# code is discarded there too.
 open_url() {
   local url="$1"
   printf '  %s↗ opening%s %s\n' "$GREEN" "$RESET" "$url"
-  { if   command -v wslview     >/dev/null 2>&1; then wslview "$url"
-    elif command -v explorer.exe >/dev/null 2>&1; then explorer.exe "$url"
-    elif command -v xdg-open    >/dev/null 2>&1; then xdg-open "$url"
-    elif command -v open        >/dev/null 2>&1; then open "$url"
+  { if   [[ -n "$WINDOWS" ]];                   then cmd //c start "" "$url"
+    elif command -v wslview      >/dev/null 2>&1; then wslview "$url"
+    elif command -v explorer.exe >/dev/null 2>&1; then explorer.exe "$url" || true
+    elif command -v xdg-open     >/dev/null 2>&1; then xdg-open "$url"
+    elif command -v open         >/dev/null 2>&1; then open "$url"
     else warn "couldn't open a browser; visit it manually: $url"; fi
   } >/dev/null 2>&1 || warn "couldn't open a browser, so visit it manually: $url"
 }
@@ -176,24 +192,56 @@ for provider in "$@"; do
 done
 
 ENV_FILE="$HOME/.claude/ticket-workflow/secrets.env"
+
+# Windows grants access by ACL. chmod there sets the read-only attribute and
+# nothing else, so a file this wizard reported as mode 600 read back as 0o666
+# in python, and tk refused to load it with a fix line no chmod could carry
+# out. icacls is the real lock: /inheritance:r drops the entries the user
+# profile passes down, and /grant:r leaves this account and no other. (OI)(CI)
+# on the directory hands the same rule to every file created inside it, which
+# covers each new copy the library writes through TMPDIR and then moves into
+# place.
+#
+# The grant is full control, not read and write. Least privilege against
+# yourself buys nothing here, because the owner of a file can raise its own
+# rights whenever it likes, and a narrower grant leans on the delete-child
+# right of the parent for every replacement the library writes.
+lock_dir() {
+  chmod 700 "$1"
+  [[ -n "$WINDOWS" ]] || return 0
+  icacls "$(cygpath -w "$1")" /inheritance:r \
+    /grant:r "${USERNAME:-$(whoami)}:(OI)(CI)(F)" >/dev/null 2>&1 \
+    || warn "could not restrict $1 to your account. Check it by hand."
+}
+
+lock_file() {
+  chmod 600 "$1"
+  [[ -n "$WINDOWS" ]] || return 0
+  icacls "$(cygpath -w "$1")" /inheritance:r \
+    /grant:r "${USERNAME:-$(whoami)}:(F)" >/dev/null 2>&1 \
+    || warn "could not restrict $1 to your account. Check it by hand."
+}
+
 # umask 077 comes first, so the directory arrives at 0700 and the file at 0600
-# from the first byte. Each chmod repairs a directory or a file that an earlier
+# from the first byte. Each lock repairs a directory or a file that an earlier
 # run left with a wider mode. mkdir -p leaves the mode of a directory that is
-# already there, so the chmod does that repair.
+# already there, so the lock does that repair.
 umask 077
 mkdir -p "$(dirname "$ENV_FILE")"
-chmod 700 "$(dirname "$ENV_FILE")"
+lock_dir "$(dirname "$ENV_FILE")"
 touch "$ENV_FILE"
-chmod 600 "$ENV_FILE"
+lock_file "$ENV_FILE"
 
 # The library builds each new copy of the file with mktemp, then moves it into
 # place. TMPDIR keeps that copy in a .tmp subdirectory of the config directory.
 # So no token passes through /tmp, and the move stays a rename on one
 # filesystem. The browser that open_url starts inherits TMPDIR, so its temp
-# files land in .tmp and never beside secrets.env.
+# files land in .tmp and never beside secrets.env. The directory is locked
+# after it is created, so a copy holding a token is never readable by another
+# account, not even for the moment before the move.
 TMPDIR="$(dirname "$ENV_FILE")/.tmp"
 mkdir -p "$TMPDIR"
-chmod 700 "$TMPDIR"
+lock_dir "$TMPDIR"
 export TMPDIR
 
 TOTAL_STAGES=1
@@ -371,12 +419,43 @@ if want figma; then
 fi
 
 stage "Lock the file and run the check"
-chmod 600 "$ENV_FILE"
-say "Wrote $ENV_FILE with mode 600."
+lock_file "$ENV_FILE"
+if [[ -n "$WINDOWS" ]]; then
+  say "Wrote $ENV_FILE. Your account alone can read it."
+else
+  say "Wrote $ENV_FILE with mode 600."
+fi
+
+# tk carries a python3 shebang, and a shebang needs that exact name on PATH.
+# A stock Windows install ships python.exe and py.exe and no python3, and the
+# name python3 there is often the Microsoft Store stub, which prints an advert
+# and exits 9009. So name the interpreter and pass the file to it. PY is an
+# array because the launcher takes an argument of its own.
+PY=()
+python_cmd() {
+  local candidates=(python3 python) candidate
+  [[ -n "$WINDOWS" ]] && candidates=(python py python3)
+  for candidate in "${candidates[@]}"; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      PY=("$candidate")
+      [[ "$candidate" == py ]] && PY=(py -3)
+      return 0
+    fi
+  done
+  return 1
+}
+
 TK="$(dirname "$0")/tk"
-if [[ ! -x "$TK" ]]; then
+if [[ ! -f "$TK" ]]; then
   warn "No tk beside this script at $TK."
   say "Your tokens are saved. Run tk doctor once tk is in place."
+  finish
+  exit 1
+fi
+if ! python_cmd; then
+  warn "No python on PATH, so tk cannot run."
+  say "Install Python 3.11 or newer, then run tk doctor."
+  SKIPPED+=("install python 3.11 or newer, then run tk doctor")
   finish
   exit 1
 fi
@@ -397,7 +476,7 @@ fi
 say "tk doctor checks every provider, not only the one you set up now."
 say "A gap in another provider is a separate fix, not a fault of this run."
 status=0
-"$TK" doctor || status=$?
+"${PY[@]}" "$TK" doctor || status=$?
 if (( status != 0 )); then
   say "tk doctor found gaps. The output above names each fix."
   finish

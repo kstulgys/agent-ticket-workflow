@@ -2,9 +2,16 @@
 import os
 import stat
 
-DEFAULT_PATH = os.path.expanduser("~/.claude/ticket-workflow/secrets.env")
+DEFAULT_PATH = os.path.join(os.path.expanduser("~"), ".claude",
+                            "ticket-workflow", "secrets.env")
 SETUP = "scripts/setup.sh"
 SCRUB = []
+# Windows has no POSIX mode. chmod there sets the read-only attribute and
+# nothing else, so a file the wizard wrote with chmod 600 reads back as 0o666
+# and the check in load refused every file on the platform, with a fix line no
+# chmod could carry out. Access to that file is an ACL, which the wizard
+# tightens with icacls, and no stdlib call reads one back.
+POSIX = os.name == "posix"
 
 
 class SecretsError(Exception):
@@ -21,15 +28,18 @@ def load(path=None):
     so a run whose real gap was a missing project profile reported a missing
     token.
 
-    A file that exists with a wider mode is still a refusal. That one is a
-    fact about the machine, and no later call can repair it.
+    A file that exists with a wider mode is still a refusal on POSIX. That one
+    is a fact about the machine, and no later call can repair it. Windows
+    reports a mode this check cannot read, so see POSIX above.
     """
     path = path or DEFAULT_PATH
     if not os.path.exists(path):
         return {}
-    mode = stat.S_IMODE(os.stat(path).st_mode)
-    if mode != 0o600:
-        raise SecretsError(f"{path} has mode {oct(mode)}. Run: chmod 600 {path}")
+    if POSIX:
+        mode = stat.S_IMODE(os.stat(path).st_mode)
+        if mode != 0o600:
+            raise SecretsError(
+                f"{path} has mode {oct(mode)}. Run: chmod 600 {path}")
     values = {}
     with open(path, encoding="utf-8") as fh:
         for line in fh:

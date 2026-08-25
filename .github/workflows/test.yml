@@ -29,3 +29,55 @@ jobs:
         run: shellcheck scripts/setup.sh
       - name: Run the suite
         run: python3 -m unittest discover -s tests -t tests
+
+  # Windows is not a second python. It is a second filesystem, a second shell,
+  # and a second permission model, and each one broke this tool in a way the
+  # ubuntu job could not see: no O_NOFOLLOW, a mode of 0o666 whatever chmod
+  # did, a path compare on the wrong separator, and two shells that read no
+  # shebang. One version is enough here, because none of those depend on one.
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Compile every module
+        run: python -m compileall -q scripts
+      - name: Run the suite
+        run: python -m unittest discover -s tests -t tests
+      - name: The wizard writes a file that tk can read
+        shell: bash
+        run: |
+          bash scripts/setup.sh figma < /dev/null | tee wizard.log
+          # A re-run is the ordinary case: it replaces a file whose ACL is
+          # already explicit, and locks it again.
+          bash scripts/setup.sh figma < /dev/null | tee -a wizard.log
+          grep -q "Your account alone can read it" wizard.log
+          # The opener used to warn on every run: explorer.exe answers
+          # non-zero even when the page is on screen.
+          for complaint in "couldn't open a browser" "could not restrict"; do
+            if grep -qF "$complaint" wizard.log; then
+              echo "the wizard reported: $complaint"; exit 1
+            fi
+          done
+          ENV_FILE="$HOME/.claude/ticket-workflow/secrets.env"
+          # The directory too, because every later copy of the file inherits
+          # from it: the library writes each one through .tmp and moves it in.
+          for target in "$ENV_FILE" "$(dirname "$ENV_FILE")"; do
+            acl="$(icacls "$(cygpath -w "$target")")"
+            printf '%s\n' "$acl"
+            if printf '%s' "$acl" | grep -Eqi 'Everyone|BUILTIN\\Users|Authenticated Users'; then
+              echo "$target is reachable beyond this account"; exit 1
+            fi
+          done
+          python -c "import sys; sys.path.insert(0, 'scripts'); from tk_lib import secrets; print(sorted(secrets.load()))"
+      - name: tk answers through the shim, in every shell that has no shebang
+        shell: cmd
+        run: scripts\tk.cmd detect
+      - name: tk answers through the shim from powershell
+        shell: pwsh
+        run: .\scripts\tk.cmd detect
+      - name: tk answers through the shim from git bash
+        shell: bash
+        run: ./scripts/tk.cmd detect

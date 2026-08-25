@@ -80,8 +80,12 @@ def _default_runner(argv, cwd, env):
     except OSError as error:
         # A local_path that is not there, or a git binary that is not on PATH,
         # raises here. run promises an int, so answer with a code and print one
-        # line. scrub runs because the error quotes a path we passed in.
-        sys.stderr.write(secrets.scrub(f"cannot run git: {error}") + "\n")
+        # line. The message names the directory, because Windows answers
+        # "[WinError 267] The directory name is invalid" and nothing more, so
+        # the reader could not tell which path was wrong. scrub runs because
+        # the text quotes a path we passed in.
+        sys.stderr.write(
+            secrets.scrub(f"cannot run git in {cwd}: {error}") + "\n")
         return FATAL
 
 

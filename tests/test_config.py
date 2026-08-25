@@ -126,6 +126,21 @@ class TestResolve(unittest.TestCase):
         self.assertEqual(
             config.resolve("59644", profiles, cwd="/repos/dup/site")["slug"], "dup")
 
+    def test_a_repo_path_with_a_tilde_and_a_trailing_separator_matches(self):
+        # Two forms a profile really carries. expanduser keeps the separators
+        # the file used, so on Windows the entry ~/repos/app never matched
+        # C:\repos... under the home directory, not even the root itself.
+        tilde = {"slug": "tilde", "tracker": {"kind": "azure"},
+                 "match": {"ticket_patterns": [], "tracker_urls": [],
+                           "repo_paths": ["~/repos/app/"]}}
+        profiles = config.load_all(root_with(tilde))
+        home = os.path.expanduser("~")
+        for cwd in (os.path.join(home, "repos", "app"),
+                    os.path.join(home, "repos", "app", "src")):
+            with self.subTest(cwd=cwd):
+                self.assertEqual(config.resolve(None, profiles, cwd=cwd)["slug"],
+                                 "tilde")
+
 
 class TestBrokenProfile(unittest.TestCase):
     def test_broken_json_names_the_file(self):

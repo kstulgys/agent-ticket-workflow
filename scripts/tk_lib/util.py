@@ -11,6 +11,12 @@ FALLBACK_NAME = "attachment"
 # the open below can still lose it to another writer. Without a bound, a
 # directory somebody keeps filling would spin the loop for ever.
 FREE_TRIES = 50
+# O_NOFOLLOW refuses a symlink at the path. Windows has no such flag, and
+# reading it raised AttributeError there, which took down every attachment
+# download and every rendered frame. CreateFile refuses a name a link already
+# holds, so O_EXCL alone keeps the guard on that platform, and one code path
+# serves both.
+NO_FOLLOW = getattr(os, "O_NOFOLLOW", 0)
 
 
 def one_line_ending(text):
@@ -121,7 +127,7 @@ def write_new(target, name, payload):
         path = free_path(target, name)
         try:
             handle = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL
-                             | os.O_NOFOLLOW, 0o600)
+                             | NO_FOLLOW, 0o600)
         except FileExistsError:
             continue
         with os.fdopen(handle, "wb") as fh:

@@ -70,6 +70,13 @@ T=~/.claude/skills/agent-ticket-workflow/scripts/tk
 $T resolve 5438
 ```
 
+On Windows the runnable names are `scripts/tk.cmd` and `scripts/setup.cmd`. Set
+`T` to the first in Git Bash, and from PowerShell or `cmd` run them with
+backslashes: `scripts\tk.cmd`. Those two shells read no shebang, and a stock
+Windows install has no `python3` for one to name, so each shim finds the
+interpreter itself. Wherever this file says `scripts/tk` or `scripts/setup.sh`,
+read the `.cmd` beside it. Nothing else changes.
+
 Every failure prints a fixed code under `error` and a sentence under `message`,
 so switch on the code, not the prose.
 
@@ -150,11 +157,12 @@ thing worth a question. It makes no network call and needs no token.
    select of three options: GitHub, Azure Boards, Jira. One question, three
    options, no free text.
 2. The token, and only when it is missing. Run `scripts/setup.sh <provider>`
-   from `~/.claude/skills/agent-ticket-workflow`. That stage opens the
-   provider's token page, names the scopes to select, writes the value to
-   `secrets.env` itself, and verifies it. You never see the value. Never ask the
-   user to paste a token into the chat, and never read one from a browser
-   session, a cookie store, or a keyring.
+   from `~/.claude/skills/agent-ticket-workflow`. On Windows outside Git Bash,
+   run `scripts\setup.cmd <provider>` instead. That stage opens the provider's
+   token page, names the scopes to select, writes the value to `secrets.env`
+   itself, and verifies it. You never see the value. Never ask the user to
+   paste a token into the chat, and never read one from a browser session, a
+   cookie store, or a keyring.
 3. The values `detect` left null and the provider needs: the Azure organization
    and project, the Jira site and project key, or the GitHub owner and
    repository. Ask for these together, in one message.

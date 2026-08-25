@@ -157,12 +157,13 @@ facts, such as the branch pattern and the state each bucket maps to. `notes.md`
 holds the knowledge an agent needs but a schema cannot express. Nothing about
 your projects is ever committed here.
 
-Tokens live in `~/.claude/ticket-workflow/secrets.env`, mode 0600. `tk` reads
-that file itself, so a token never reaches the terminal, a log, or an agent
-transcript. Every message `tk` prints goes through a scrubber that masks both
-the value in that file and the encoded header built from it. The one exception
-is `tk git`, which passes git's own output through untouched, so do not run a
-command that prints configuration through it, such as `git config --list`.
+Tokens live in `~/.claude/ticket-workflow/secrets.env`, mode 0600, or an ACL
+that names your account alone on Windows. `tk` reads that file itself, so a
+token never reaches the terminal, a log, or an agent transcript. Every message
+`tk` prints goes through a scrubber that masks both the value in that file and
+the encoded header built from it. The one exception is `tk git`, which passes
+git's own output through untouched, so do not run a command that prints
+configuration through it, such as `git config --list`.
 
 ## The method
 
@@ -184,6 +185,22 @@ table.
 - Node, for the setup wizard only, and only on a machine with no `claude` CLI.
   The wizard then installs the Superpowers skills with `npx skills`, which sends
   an install telemetry event.
+
+### Windows
+
+Two extra requirements, and one difference:
+
+- Git for Windows, for the `bash` the wizard is written in. Claude Code needs
+  it on that platform anyway.
+- From PowerShell or `cmd`, run `scripts\setup.cmd` and `scripts\tk.cmd`.
+  Neither shell reads a shebang, so plain `scripts\tk` starts nothing. Git Bash
+  and WSL run `scripts/setup.sh` and `scripts/tk` as everywhere else, and
+  `scripts/tk.cmd` works there too.
+- `secrets.env` is locked by an ACL instead of mode 0600. `chmod` on Windows
+  sets the read-only attribute and grants nothing, and Python reads back 0o666
+  whatever it did, so a mode is neither the lock nor a check worth making. The
+  wizard drops the entries the user profile passes down and grants your account
+  alone, and `tk` checks the mode on POSIX only.
 
 ## Install
 
@@ -221,11 +238,12 @@ Install the agent-ticket-workflow skill for me.
    agent-ticket-workflow, because the skill name and the directory name must
    match.
 2. From that directory, run: python3 -m unittest discover -s tests -t tests
+   On Windows the interpreter is called python, not python3.
    Tell me the result.
 3. Do not mint any token and do not write any config file or project profile.
    The skill asks for what it needs when it needs it. You may run
-   scripts/setup.sh superpowers, which installs skills and asks for no token.
-   Run no other stage of that script.
+   scripts/setup.sh superpowers, or scripts\setup.cmd superpowers on Windows,
+   which installs skills and asks for no token. Run no other stage of it.
 4. Then tell me it is ready, and that I start a job by typing: work on <ticket>
 ```
 
@@ -292,9 +310,9 @@ and a human must choose.
 python3 -m unittest discover -s tests -t tests
 ```
 
-483 tests, no network. Every provider response is a fixture, and a test that
-queues one asserts the queue drained, so a call the code never makes fails the
-test.
+On Windows that interpreter is called `python`. 486 tests, no network. Every
+provider response is a fixture, and a test that queues one asserts the queue
+drained, so a call the code never makes fails the test.
 
 ## References
 

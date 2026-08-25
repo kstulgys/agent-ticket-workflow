@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 import helpers  # noqa: F401
 
@@ -206,12 +207,35 @@ class TestWriteNew(unittest.TestCase):
         # A dangling link is the sharp case. exists follows it and answers
         # False, so the old open created the file the link named, outside the
         # target. The payload must land beside the link instead.
-        root = self.enterContext(tempfile.TemporaryDirectory())
-        target = os.path.join(root, "att")
-        os.mkdir(target)
-        outside = os.path.join(root, "outside.txt")
-        os.symlink(outside, os.path.join(target, "shot.png"))
+        root, target, outside = self._dangling_link()
         path = util.write_new(target, "shot.png", b"payload")
         self.assertEqual(path, os.path.join(target, "shot-1.png"))
         self.assertFalse(os.path.exists(outside))
         self.assertEqual(os.listdir(root), ["att"])
+
+    def test_a_link_is_refused_with_no_o_nofollow_flag_to_pass(self):
+        # Windows has no O_NOFOLLOW, so the flag set falls back to 0 there and
+        # O_EXCL carries the guard alone. Both platforms must refuse the name
+        # the link holds, or an attachment lands wherever the link points.
+        root, target, outside = self._dangling_link()
+        with mock.patch.object(util, "NO_FOLLOW", 0):
+            path = util.write_new(target, "shot.png", b"payload")
+        self.assertEqual(path, os.path.join(target, "shot-1.png"))
+        self.assertFalse(os.path.exists(outside))
+
+    def _dangling_link(self):
+        """A target directory whose shot.png is a link to a file nobody wrote.
+
+        Windows needs a privilege for a symlink, and a machine that refuses one
+        cannot run this case at all. Skipping says so, where an error would
+        read as the guard being broken.
+        """
+        root = self.enterContext(tempfile.TemporaryDirectory())
+        target = os.path.join(root, "att")
+        os.mkdir(target)
+        outside = os.path.join(root, "outside.txt")
+        try:
+            os.symlink(outside, os.path.join(target, "shot.png"))
+        except (OSError, NotImplementedError) as error:
+            self.skipTest(f"this machine refuses a symlink: {error}")
+        return root, target, outside

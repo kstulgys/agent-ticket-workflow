@@ -40,10 +40,16 @@ def client(*responses):
 
 
 def tmp_bytes(test, name, payload):
-    """Writes one file in a temp directory that goes away with the test."""
+    """Writes one file in a temp directory that goes away with the test.
+
+    The parents come first, as in test_github.py. A name holding a separator is
+    one file name on POSIX and a path on Windows, and the separator case below
+    needs the same bytes on disk to ask the same question on both.
+    """
     root = tempfile.mkdtemp()
     test.addCleanup(shutil.rmtree, root, True)
     path = pathlib.Path(root, name)
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(payload)
     return path
 
@@ -404,8 +410,11 @@ class TestPrAttachAndDescribe(unittest.TestCase):
         fake.assert_drained()
 
     def test_a_separator_in_the_name_cannot_reach_the_url(self):
-        # A backslash is a separator on a Windows client. util.safe_name drops
-        # the directory part, so no path fragment reaches the route.
+        # A backslash is a separator on a Windows client and an ordinary
+        # character in a POSIX file name. So this is one file called
+        # shots\panel.png here and a file in a shots directory there, and
+        # util.safe_name drops the directory part either way: no path fragment
+        # reaches the route.
         png = tmp_bytes(self, "shots\\panel.png", b"\x89PNG")
         api, fake = client(FakeResponse(200, {"url": "http://x/panel.png"}),
                            FakeResponse(200, b"\x89PNG"))

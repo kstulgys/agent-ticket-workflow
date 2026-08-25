@@ -3,6 +3,7 @@ import pathlib
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 import helpers  # noqa: F401
 
@@ -42,10 +43,19 @@ class TestSecrets(unittest.TestCase):
         self.assertEqual(values["A"], '"abc"')
         self.assertEqual(values["B"], "abcdefgh12345678")
 
+    @unittest.skipUnless(secrets.POSIX, "no POSIX mode to widen")
     def test_refuses_a_mode_other_than_600(self):
         with self.assertRaises(secrets.SecretsError) as cm:
             secrets.load(write(self, "GH_TOKEN=abcdefgh12345678\n", mode=0o644))
         self.assertIn("chmod 600", str(cm.exception))
+
+    def test_reads_a_wide_mode_where_the_platform_has_no_mode(self):
+        # Windows answers 0o666 for every readable file, whatever the wizard
+        # did, so this check refused every run on that platform and named a
+        # chmod that could not repair it. The lock there is an ACL.
+        path = write(self, "GH_TOKEN=abcdefgh12345678\n", mode=0o644)
+        with mock.patch.object(secrets, "POSIX", False):
+            self.assertEqual(secrets.load(path)["GH_TOKEN"], "abcdefgh12345678")
 
     def test_a_missing_file_answers_with_no_values(self):
         # A machine with no token yet is a normal state. Raising here answered

@@ -6,7 +6,7 @@ import sys
 
 from . import cli
 
-ROOT = os.path.expanduser("~/.claude/ticket-workflow")
+ROOT = os.path.join(os.path.expanduser("~"), ".claude", "ticket-workflow")
 
 _URL_TICKET = (
     re.compile(r"_workitems/edit/([0-9]+)"),
@@ -88,6 +88,23 @@ def _ticket_from_url(url):
     return None
 
 
+def _holds(root, cwd):
+    """True when cwd is root itself or sits under it.
+
+    normcase folds the separator and the case, abspath names the drive, and
+    both drop a trailing separator. A profile carries C:/repos/app while
+    getcwd answers C:\\repos\\App, so the plain string compare this replaces
+    matched the repository root and no directory inside it: every run from a
+    subdirectory on Windows resolved to no project. A repo_paths entry written
+    with ~ missed even the root, because expanduser keeps the separators the
+    profile used. resolve hands cwd through abspath already, so doing the same
+    to root is what keeps the two comparable.
+    """
+    root = os.path.normcase(os.path.abspath(os.path.expanduser(root)))
+    cwd = os.path.normcase(os.path.abspath(cwd))
+    return cwd == root or cwd.startswith(root + os.sep)
+
+
 def _by_cwd(profiles, cwd):
     """Slugs whose repo paths hold the directory. One hit per profile.
 
@@ -97,11 +114,9 @@ def _by_cwd(profiles, cwd):
     """
     hits = []
     for slug, profile in profiles.items():
-        for path in _match(profile).get("repo_paths", []):
-            root = os.path.expanduser(path).rstrip("/")
-            if cwd == root or cwd.startswith(root + "/"):
-                hits.append(slug)
-                break
+        if any(_holds(path, cwd)
+               for path in _match(profile).get("repo_paths", [])):
+            hits.append(slug)
     return hits
 
 
