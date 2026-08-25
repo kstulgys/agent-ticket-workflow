@@ -149,7 +149,7 @@ finish() {
 # Replace the example below. Set TOTAL_STAGES to match the stages you write.
 # ──────────────────────────────────────────────────────────────────────────
 
-# This wizard installs the Superpowers plugin, then writes the tokens tk needs
+# This wizard installs the Superpowers skills, then writes the tokens tk needs
 # into secrets.env. tk reads that file itself, so a token never goes to the
 # terminal or to a transcript.
 #
@@ -214,31 +214,57 @@ curl_cfg() {
   printf '%s = "%s"\n' "$1" "$value"
 }
 
-# The methodology this skill runs on. It ships as a Claude Code plugin, so the
-# install is one CLI call and needs no token. It comes before the token stages
-# because it governs how the whole run behaves, and because a missing plugin is
-# the one gap a later stage cannot report.
+# The methodology this skill runs on. Two routes install it, and this stage
+# picks one.
+#
+# The Claude Code plugin adds a session-start hook that loads
+# using-superpowers on turn one, so it wins when the claude CLI is here. It
+# reaches Claude Code only, and it names the skills superpowers:<name>.
+#
+# The skills CLI copies the same folders into ~/.agents/skills, which Claude
+# Code, Codex, Cursor, and Copilot all read, so it covers a machine that runs
+# more than one agent. It names the skills <name>, with no prefix.
+#
+# Neither route needs a token. Both routes get checked before either installs,
+# because two copies give every skill two names and then drift apart.
+superpowers_by_hand() {
+  say "Install it one of these ways, then restart your agent:"
+  note "  /plugin install superpowers@claude-plugins-official   (Claude Code)"
+  note "  npx skills add obra/superpowers -g                    (any agent)"
+  SKIPPED+=("install the superpowers skills")
+}
+
 if want superpowers; then
   stage "Superpowers methodology"
-  say "This skill runs the Superpowers workflow, so it needs that plugin."
+  say "This skill runs the Superpowers workflow, so it needs those skills."
   if claude plugin list 2>/dev/null | grep -q 'superpowers@'; then
-    say "Already installed. Nothing to do."
-  elif ! command -v claude >/dev/null 2>&1; then
-    warn "No claude CLI on PATH, so this step cannot install the plugin."
-    say "Install it from inside Claude Code with:"
-    note "  /plugin install superpowers@claude-plugins-official"
-    SKIPPED+=("install the superpowers plugin")
-  else
+    say "The plugin is installed. Nothing to do."
+  elif [[ -d "$HOME/.agents/skills/using-superpowers" ]] \
+    || [[ -d "$HOME/.claude/skills/using-superpowers" ]]; then
+    say "The skills are installed. Nothing to do."
+  elif command -v claude >/dev/null 2>&1; then
     step "Installing superpowers@claude-plugins-official."
     # --yes is required here, because stdout is not a terminal under an agent
     if claude plugin install superpowers@claude-plugins-official --yes >/dev/null 2>&1; then
       say "Installed. A restart of Claude Code loads it."
     else
       warn "The install did not finish."
-      say "Run this by hand from inside Claude Code:"
-      note "  /plugin install superpowers@claude-plugins-official"
-      SKIPPED+=("install the superpowers plugin")
+      superpowers_by_hand
     fi
+  elif command -v npx >/dev/null 2>&1; then
+    step "Installing the superpowers skills with npx skills."
+    # -g installs for the agent this runs under, and for ~/.agents/skills. The
+    # second -y answers the prompts, because stdout is not a terminal under an
+    # agent. Leave out -a: the CLI detects the agent and targets that one.
+    if npx -y skills add obra/superpowers -g -y >/dev/null 2>&1; then
+      say "Installed to ~/.agents/skills. A restart of your agent loads them."
+    else
+      warn "The install did not finish."
+      superpowers_by_hand
+    fi
+  else
+    warn "No claude CLI and no npx, so this step cannot install anything."
+    superpowers_by_hand
   fi
 fi
 

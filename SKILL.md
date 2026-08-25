@@ -25,8 +25,7 @@ failure this routine prevents.
 ## Method
 
 This routine is the Superpowers workflow applied to tickets. Invoke
-`superpowers:using-superpowers` first, before you read the ticket or open a
-file.
+`using-superpowers` first, before you read the ticket or open a file.
 
 That skill sets the one rule the rest of this file leans on: a process skill
 chooses the approach, then an implementation skill carries it out. Skip it and a
@@ -53,11 +52,13 @@ the phase, not all of them at the start.
 | After the merge | `finishing-a-development-branch` | Closes the branch and clears the worktree |
 | Batch mode, independent tickets | `dispatching-parallel-agents` | Runs tickets at once instead of one after another |
 
-Every name above takes the `superpowers:` prefix. Your own skill list tells you
-whether the plugin is loaded, so no command asks. When those names are absent,
-`scripts/setup.sh superpowers` installs the plugin, and a restart of Claude Code
-loads it. Say that once and carry on, because the phases below still describe
-the work.
+Your own skill list tells you whether those skills are loaded, so no command
+asks. A Claude Code plugin install names them `superpowers:using-superpowers`
+and so on, and a shared skills directory install names them with no prefix.
+Either name is the same skill, so take whichever your list shows. When neither
+form is there, `scripts/setup.sh superpowers` installs them, and a restart of
+your agent loads them. Say that once and carry on, because the phases below
+still describe the work.
 
 ## 0. Start where the user is
 
@@ -259,10 +260,9 @@ Three traps sit in that question:
 - `split` needs proof this repo is blocked. Check what signal it already
   receives. It is often enough for the whole job, which makes it `fixable-here`.
 
-A Bug drives through `superpowers:systematic-debugging`, with the rigour scaled
-to the bug. A label, sort, or copy fix earns a quick repro and a root-cause
-trace. A data or mapping bug earns the full loop. A Story or a Task skips that
-skill.
+A Bug drives through `systematic-debugging`, with the rigour scaled to the bug.
+A label, sort, or copy fix earns a quick repro and a root-cause trace. A data or
+mapping bug earns the full loop. A Story or a Task skips that skill.
 
 Code you cannot localise goes to a read-only `scout` subagent, which keeps your
 context lean. Verify its verdict before you edit. Scouts have named the wrong app

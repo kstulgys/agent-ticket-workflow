@@ -177,10 +177,13 @@ table.
 - Python 3.11 or later. `tk` itself is standard library only, with no
   dependencies and no virtualenv.
 - `git`.
-- The Superpowers plugin, for the method below. It is optional. Without it the
-  eight phases still run, and the routine says so once and carries on. Add it
-  with `scripts/setup.sh superpowers`.
+- The Superpowers skills, for the method below. They are optional. Without them
+  the eight phases still run, and the routine says so once and carries on. Add
+  them with `scripts/setup.sh superpowers`.
 - `curl`, for the setup wizard only.
+- Node, for the setup wizard only, and only on a machine with no `claude` CLI.
+  The wizard then installs the Superpowers skills with `npx skills`, which sends
+  an install telemetry event.
 
 ## Install
 
@@ -197,8 +200,16 @@ write. The skill asks for a credential the first time one is refused, and for
 one provider only.
 
 One optional step is left, and it is not a gate. `scripts/setup.sh superpowers`
-installs the plugin the method section names, and a restart of Claude Code loads
-it. Skip it and the phases still run.
+installs the skills the method section names, and a restart of your agent loads
+them. Skip it and the phases still run.
+
+That step picks a route. With the `claude` CLI on PATH it installs the Claude
+Code plugin, which loads `using-superpowers` on turn one through a session-start
+hook. Without it the step runs `npx skills add obra/superpowers -g`, which
+copies the same skills into `~/.agents/skills`. Claude Code, Codex, Cursor, and
+Copilot all read that directory, so one copy serves every agent on the machine.
+Run one route, not both: two copies give every skill two names, and they drift
+apart.
 
 ### Or paste this to your agent
 
@@ -213,7 +224,7 @@ Install the agent-ticket-workflow skill for me.
    Tell me the result.
 3. Do not mint any token and do not write any config file or project profile.
    The skill asks for what it needs when it needs it. You may run
-   scripts/setup.sh superpowers, which installs a plugin and asks for no token.
+   scripts/setup.sh superpowers, which installs skills and asks for no token.
    Run no other stage of that script.
 4. Then tell me it is ready, and that I start a job by typing: work on <ticket>
 ```
